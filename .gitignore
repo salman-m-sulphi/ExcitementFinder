@@ -1,0 +1,15 @@
+.venv/
+data/
+models/
+logs/
+webview/
+library/
+build/
+dist/
+__pycache__/
+*.pyc
+*.spec
+storage-location.txt
+quality-preference.json
+.env
+.env.*
