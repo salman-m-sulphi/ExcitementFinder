@@ -127,7 +127,7 @@ def normalize_speaker_features(bins, turns, words, audio=None):
     uncontested reference; short, mixed and unknown speech gets no volume cue.
     Non-speech bins retain sound-event cues. Original measurements are retained.
     """
-    assignments = []
+    assignments, speech_present = [], []
     for b in bins:
         coverage = {}
         overlaps = []
@@ -145,6 +145,7 @@ def normalize_speaker_features(bins, turns, words, audio=None):
         if mixed or len(coverage) != 1 or (dominant is not None and coverage[dominant] < .6 * (b['end'] - b['start'])):
             dominant = None
         assignments.append(dominant)
+        speech_present.append(b['speech_fraction'] >= .2 or bool(overlaps))
     references = {}
     for i, b in enumerate(bins):
         label = assignments[i]
@@ -205,21 +206,25 @@ def normalize_speaker_features(bins, turns, words, audio=None):
         count = np.searchsorted(times, end) - np.searchsorted(times, a)
         b['speaker_wpm'] = round(float(count * 60 / speaking), 1) if speaking >= 2 else 0
     pace_baselines = {label: max(1, float(np.median([bins[i]['speaker_wpm'] for i in indices if bins[i]['speaker_wpm'] > 0] or [1]))) for label, indices in references.items() if label in baselines}
-    previous = {}
+    previous, previous_voice = {}, None
     for i, b in enumerate(bins):
         label = assignments[i]
         b['raw_surge_db'] = b['surge_db']
         b['speaker'] = label
         b['speaker_baseline_db'] = round(baselines[label], 2) if label in baselines else None
         b['speaker_normalized'] = label in baselines
-        if b['speech_fraction'] < .2:
+        if not speech_present[i]:
+            b['signals']['pace'] = 0
             continue
         # Suppress uncertain speech energy; do not silently fall back to the
         # previous commentator's level if detection fails or voices overlap.
         if label not in baselines:
             b['surge_db'] = 0
-            b['signals'].update(surge=0, loudness=0, pace=0)
+            b['signals'].update(surge=0, loudness=0, pace=0, change=0)
             continue
+        if label != previous_voice:
+            b['signals']['change'] = 0
+        previous_voice = label
         measured = b['db']
         if label in speech_energy:
             times, levels = speech_energy[label]

@@ -46,5 +46,18 @@ class SpeakerScoringTests(unittest.TestCase):
             normalize_speaker_features(bins,turns,[])
             self.assertTrue(all(b['signals']['surge']==0 and b['signals']['loudness']==0 for b in bins))
 
+    def test_diarized_speech_is_corrected_even_if_vad_misses_it(self):
+        first=.005*np.sin(2*np.pi*180*np.arange(20*SR)/SR)
+        second=.15*np.sin(2*np.pi*250*np.arange(20*SR)/SR)
+        audio=np.concatenate([first,second]).astype('float32')
+        bins=extract_features(audio,[],[])
+        turns=[dict(start=0,end=20,speaker=0),dict(start=20,end=40,speaker=1)]
+        normalize_speaker_features(bins,turns,[],audio)
+        self.assertTrue(all(b['signals']['surge']==0 and b['signals']['loudness']==0 for b in bins))
+
+    def test_voice_switch_does_not_earn_a_timbre_change_bonus(self):
+        bins,_=self.analyze_voices([-30,-10])
+        self.assertEqual(bins[15]['signals']['change'],0)
+
 
 if __name__=='__main__':unittest.main()

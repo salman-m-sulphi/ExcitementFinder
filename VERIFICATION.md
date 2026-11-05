@@ -1,6 +1,6 @@
 # Release verification
 
-The clean release source was tested on Windows on 2026-11-05. The automated suite ran 26 tests: 25 passed and the opt-in real-model transcription test was skipped. Previous application verification exercised actual local Tiny transcription and playback.
+The clean release source was tested on Windows on 2026-11-05. The automated suite ran 28 tests: 27 passed and the opt-in real-model transcription test was skipped. Previous application verification exercised actual local Tiny transcription and playback.
 
 Coverage includes signal scoring, upload/retry/deletion, local-origin checks, media seeking, individual/ZIP/combined exports, precise manual bounds, source-quality propagation, explicit cached recovery, and timestamped DASH fragments with real generated pictures and sound.
 

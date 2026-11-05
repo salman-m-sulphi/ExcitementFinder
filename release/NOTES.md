@@ -8,7 +8,7 @@ Download ExcitementFinder-Windows.zip, extract the whole ZIP, and run Excitement
 - Update older saved scoring using retained media/transcript, preserving the previous result.
 - Individual MP4, all-events ZIP, combined video, source-quality selection, and precise manual In/Out export.
 
-Validation: 25 Python tests passed, one optional transcription test skipped, and event-selection regression checks passed. Count-free diarization separated the four-voice reference example; speaker detection remains imperfect with overlap, short turns and background audio. Scores are review suggestions, not guaranteed highlights.
+Validation: 27 Python tests passed, one optional transcription test skipped, and event-selection regression checks passed. Count-free diarization separated the four-voice reference example; speaker detection remains imperfect with overlap, short turns and background audio. Scores are review suggestions, not guaranteed highlights.
 
 Original application code: PolyForm Noncommercial 1.0.0. Improvements and noncommercial sharing are welcome; commercial use or selling the app or derivatives requires separate permission. Third-party components retain their own licenses. Input and exported media retain their original rights.
 

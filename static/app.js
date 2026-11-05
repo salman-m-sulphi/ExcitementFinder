@@ -5,6 +5,7 @@ let data=null, scores=[], weights={}, currentJob=null, pollTimer=null, selected=
 let exportBusy=false;
 let failedDownload=null;
 let qualitiesReady=false, rangePreview=false;
+let automaticEventThreshold=true;
 const momentLength=()=>Number($('#clipLength').value);
 const time = s => {s=Math.max(0,Math.floor(s||0));return s>=3600?`${Math.floor(s/3600)}:${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`:`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`};
 function element(tag,cls,text){let e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
@@ -24,16 +25,16 @@ async function openResult(id){
     $('#video').src=data.media_url;$('#video').onerror=()=>error(Error('The browser could not play this media. Try another file or inspect the local server log.'));
     $('#warnings').replaceChildren(...data.warnings.map(w=>element('p','',w)));
     if((data.scoring_revision||1)<2){const note=element('p','','This saved analysis uses older volume scoring. Update it to account for different commentator levels.');const button=element('button','clip-download','Update commentator scoring');button.onclick=async()=>{button.disabled=true;try{await api(`/api/jobs/${id}/refresh-scoring`,{method:'POST'});watch(id)}catch(e){error(e);button.disabled=false}};$('#warnings').append(note,button)}
-    else $('#warnings').append(element('p','',`${data.speakers?.detected_speakers||0} voices detected automatically · ${data.speakers?.calibrated_speakers||0} with enough reference speech. Voice detection can be imperfect.`));
+    else $('#warnings').append(element('p','',`${data.speakers?.detected_speakers||0} voice profiles estimated automatically · ${data.speakers?.calibrated_speakers||0} with enough reference speech. Profiles can split or merge people; this is not an exact commentator count.`));
     $('#midTime').textContent=time(data.duration/2);$('#endTime').textContent=time(data.duration);
     $('#heatmap').setAttribute('aria-valuemax',data.duration);$('#methodText').textContent=data.methodology;
-    weights={...data.default_weights};buildWeights();renderTranscript();selected=0;
+    weights={...data.default_weights};automaticEventThreshold=true;buildWeights();renderTranscript();selected=0;
     $('#rangeIn').value=preciseTime(0);$('#rangeOut').value=preciseTime(Math.min(12,Math.floor(data.duration*1000)/1000));$('#mapAction').value='seek';
     rescore();updateRange();history.replaceState(null,'',`#${id}`);loadQualities(id);
   }catch(e){error(e)}
 }
 function buildWeights(){$('#weights').replaceChildren();for(const k of Object.keys(labels)){const row=element('div','weight');const label=element('label','',labels[k]);label.htmlFor=`weight-${k}`;const out=element('output','',weights[k]);out.id=`value-${k}`;const input=element('input');input.type='range';input.id=`weight-${k}`;input.min=0;input.max=100;input.value=weights[k];if(k==='pace'&&!data.has_words){weights[k]=0;input.value=0;input.disabled=true;out.textContent='—'}input.oninput=()=>{weights[k]=+input.value;out.textContent=input.value;rescore()};row.append(label,out,input,element('small','',k==='pace'&&!data.has_words?'Unavailable — excluded from scoring':hints[k]));$('#weights').append(row)}}
-function rescore(){if(!data)return;const denom=Object.values(weights).reduce((a,b)=>a+b,0);scores=data.bins.map(b=>b.silence||!denom?0:Math.round(1000*Object.entries(b.signals).reduce((s,[k,v])=>s+(weights[k]||0)*v,0)/denom)/10);draw();renderRanked();inspect(selected)}
+function rescore(){if(!data)return;const denom=Object.values(weights).reduce((a,b)=>a+b,0);scores=data.bins.map(b=>b.silence||!denom?0:Math.round(1000*Object.entries(b.signals).reduce((s,[k,v])=>s+(weights[k]||0)*v,0)/denom)/10);if(automaticEventThreshold){const active=scores.filter((s,i)=>!data.bins[i].silence&&s>0).sort((a,b)=>a-b);$('#eventThreshold').value=Math.max(20,Math.min(60,Math.ceil(active[Math.floor(Math.max(0,active.length-1)*.95)]||20)))}draw();renderRanked();inspect(selected)}
 $('#reset').onclick=()=>{weights={...data.default_weights};buildWeights();rescore()};
 function color(s,silent){if(silent)return '#4b524f';const stops=[[38,83,151],[41,164,151],[194,214,86],[245,145,73],[237,66,66]];let p=Math.min(3.999,Math.max(0,s/100*4)),i=Math.floor(p),f=p-i;return `rgb(${stops[i].map((v,k)=>Math.round(v*(1-f)+stops[i+1][k]*f)).join(',')})`}
 function draw(){
@@ -63,7 +64,7 @@ $('#heatmap').onkeydown=e=>{if(!data)return;if(['ArrowRight','ArrowLeft','Home',
 function seek(seconds){rangePreview=false;const v=$('#video');v.currentTime=Math.max(0,Math.min(data.duration,seconds)-Number($('#lead').value));v.play().catch(()=>{});updatePlayhead()}
 function updatePlayhead(){if(!data)return;const t=$('#video').currentTime;if(rangePreview){const range=readRange();if(!range||t>=range.end){$('#video').pause();rangePreview=false}}$('#playhead').style.left=`${Math.min(100,t/data.duration*100)}%`;$('#playTime').textContent=`${time(t)} / ${time(data.duration)}`;$('#heatmap').setAttribute('aria-valuenow',t.toFixed(1));let current=data.transcript.find(s=>s.start<=t&&s.end>t);$('#currentText').textContent=current?.text||'No transcribed speech at this timestamp.';for(const [el,s]of transcriptRows)el.classList.toggle('active',s===current)}
 $('#video').ontimeupdate=updatePlayhead;
-function ranked(){if(!data||!Object.values(weights).some(v=>v>0))return [];return ExcitementEvents.selectEvents(data.bins,scores,Number($('#eventThreshold').value))}
+function ranked(){if(!data||!Object.values(weights).some(v=>v>0))return [];return ExcitementEvents.selectEvents(data.bins,scores,Math.max(1,Math.min(100,Number($('#eventThreshold').value)||20)))}
 function reasons(i){const b=data.bins[i],total=Object.values(weights).reduce((a,b)=>a+b,0)||1;return Object.entries(b.signals).filter(([k,v])=>weights[k]>0&&v>0).sort((a,c)=>weights[c[0]]*c[1]-weights[a[0]]*a[1]).slice(0,3).map(([k,v])=>`${labels[k]} +${(100*weights[k]*v/total).toFixed(1)} pts`).join(' · ')}
 function renderRanked(){
   const container=$('#ranked');container.replaceChildren();const picks=ranked();
@@ -119,7 +120,8 @@ function clearRecovery(){failedDownload=null;for(const selector of ['#retryCache
 function retryCached(){const failed=failedDownload;if(!failed||exportBusy||data?.id!==failed.jobId)return;setQuality(failed.quality);downloadRanges(failed.segments,failed.format,failed.jobId)}
 $('#retryCachedRange').onclick=retryCached;$('#retryCachedMoments').onclick=retryCached;
 $('#clipLength').onchange=()=>{if(data)renderRanked()};
-$('#eventThreshold').oninput=()=>{if(data)renderRanked()};
+$('#eventThreshold').oninput=()=>{automaticEventThreshold=false;if(data)renderRanked()};
+$('#autoThreshold').onclick=()=>{automaticEventThreshold=true;if(data)rescore()};
 $('#downloadAll').onclick=()=>downloadMoments(ranked(),'zip');
 $('#downloadCombined').onclick=()=>downloadMoments(ranked(),'combined');
 let qualityCatalog=null;

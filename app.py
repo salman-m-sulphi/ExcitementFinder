@@ -312,14 +312,16 @@ SCORING_METHOD = ('Audio-based review heuristic, not a probability or visual-act
     'Speaker detection is imperfect, especially with overlap, music, short turns and very quiet speech. Event ranges retain nearby peaks separated by a score valley; continuous excitement stays in a longer event. Silence is forced to zero.')
 
 
-def speaker_scoring(audio, intervals, words, bins, warnings, job_id):
-    turns = []
-    if intervals:
+def speaker_scoring(audio, intervals, words, bins, warnings, job_id, cached=None):
+    model_revision = 'pyannote-full-campplus-v1'
+    turns = cached.get('turns', []) if cached and cached.get('model_revision') == model_revision else []
+    if intervals and not turns:
         try:
             turns = detect_speakers(audio, MODELS, lambda fraction, message: update(job_id, 70 + 20 * fraction, message))
         except Exception as exc:
             warnings.append('Commentator detection unavailable: uncertain speech volume and pace cues were disabled, rather than using another commentator\'s baseline. ' + str(exc)[:200])
     info = normalize_speaker_features(bins, turns, words, audio)
+    info['model_revision'] = model_revision
     if intervals and info['calibrated_speakers'] < info['detected_speakers']:
         warnings.append('Some detected voices have less than eight seconds of clear reference. Their speech volume and pace cues are disabled.')
     return info
@@ -532,7 +534,7 @@ def refresh_scoring(job_id):
         audio = np.memmap(pcm, dtype='float32', mode='r')
         warnings = [w for w in saved.get('warnings', []) if not w.startswith(('Commentator detection', 'Some detected voices'))]
         bins = extract_features(audio, saved.get('speech_intervals', []), saved.get('words', []), lambda p, m: update(job_id, p, m))
-        info = speaker_scoring(audio, saved.get('speech_intervals', []), saved.get('words', []), bins, warnings, job_id)
+        info = speaker_scoring(audio, saved.get('speech_intervals', []), saved.get('words', []), bins, warnings, job_id, saved.get('speakers'))
         audio = None
         backup = folder / 'result.before-speaker-scoring.json'
         if not backup.exists():

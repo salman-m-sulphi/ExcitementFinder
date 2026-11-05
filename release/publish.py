@@ -9,6 +9,8 @@ def api(path,data=None,method=None):
     request=urllib.request.Request(base+path,data=json.dumps(data).encode() if data is not None else None,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json'},method=method)
     with urllib.request.urlopen(request,timeout=60) as response:return json.load(response)
 body=(root/'release/NOTES.md').read_text(encoding='utf-8')
+if api('/commits/main')['sha'] != os.environ['GITHUB_SHA']:
+    raise RuntimeError('A newer source revision exists; refusing to publish a superseded build')
 payload=dict(tag_name='v1.0.0',target_commitish=os.environ['GITHUB_SHA'],name='Excitement Finder v1.0.0 — Windows',body=body,draft=True,prerelease=False)
 existing=next((r for r in api('/releases') if r['tag_name']=='v1.0.0' or r['draft']),None)
 release=api('/releases/'+str(existing['id']),payload,'PATCH') if existing else api('/releases',payload,'POST')

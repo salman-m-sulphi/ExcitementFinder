@@ -14,7 +14,7 @@ Silero VAD measures speech fraction. Positive changes in normalized FFT spectra 
 
 ## Nearby and sustained moments
 
-The event threshold defaults to 60. An event can continue down to threshold minus 15, so small fluctuations do not chop continuous excitement into separate clips. A valley of at least 15 score points between two strong peaks splits them, even if they occur less than twenty seconds apart. Separate regions crossing below the continuation level remain separate. Flat plateaus are one event. There is no top-twelve truncation or fixed minimum distance between events.
+The initial event threshold adapts to the active bins’ 95th percentile, bounded between 20 and 60. It can be edited, or restored with Auto threshold. An event can continue down to threshold minus 15, so small fluctuations do not chop continuous excitement into separate clips. A valley of at least 15 score points between two strong peaks splits them, even if they occur less than twenty seconds apart. Separate regions crossing below the continuation level remain separate. Flat plateaus are one event. There is no top-twelve truncation or fixed minimum distance between events.
 
 Every retained event includes its full detected start/end range. Download controls add playback lead-in before the event and the selected tail after it. Individual and ZIP downloads retain separate events; the combined video sorts ranges and merges overlaps to avoid repeated footage. Manual In/Out bounds remain independent and exact to frame/packet granularity. Lowering the event threshold exposes weaker candidates; no threshold guarantees every important sporting event will be found.
 
