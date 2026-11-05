@@ -15,7 +15,7 @@ The choice applies to individual recommended clips, **Download all · ZIP**, **C
 
 ## Download recommended moments
 
-Choose **Moment length** (12, 20, 30, or 60 seconds after the recommended timestamp), then use the card's **Download clip** button. These recommended clips also include your selected playback lead-in, clipped to the start/end of the recording.
+Each card is a complete detected event, with its strongest timestamp shown as the peak. Choose **Tail after event**, then use **Download clip**. The range includes the whole event plus your selected playback lead-in and tail, clipped to the recording. **No tail** adds nothing after the detected event end. Nearby peaks separated by a score valley stay separate, with no twenty-second exclusion or top-twelve cap. The adjustable **Event threshold** can expose weaker candidates. **Download all** includes every retained event.
 
 **Download all · ZIP** saves each listed moment as a separate MP4 plus `timestamps.json` documenting requested ranges, chosen source quality, measured output dimensions, and source origin.
 

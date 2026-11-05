@@ -7,3 +7,4 @@ imageio-ffmpeg==0.8.1
 faster-whisper==1.2.1
 yt-dlp[default]==2026.10.26
 httpx==0.28.1
+sherpa-onnx==1.13.5

@@ -11,7 +11,9 @@ Requires Windows 10/11 x64 and [Microsoft Edge WebView2 Runtime](https://develop
 ## Features
 
 - Local audio analysis and multilingual Whisper transcription; no paid API or API key.
+- Automatic local speaker clustering without entering a commentator count. Speech volume and pace are compared with each voice’s own baseline.
 - Adjustable scoring from word pace, volume surge, loudness, speech activity, and sound changes.
+- Event ranges preserve nearby peaks, extend through sustained excitement, and have no top-twelve cutoff. Event threshold, lead-in, and tail are adjustable.
 - Timestamped transcript, heatmap seeking, playback lead-in, and saved analyses.
 - Individual moment MP4s, all moments in a ZIP, or a combined chronological video.
 - Exact manual In/Out selection and available original/source download qualities.
@@ -41,6 +43,8 @@ The result is under `dist/ExcitementFinder`. Analyze a short recording with Tiny
 | --- | --- |
 | `static/` | HTML/CSS/JavaScript interface, heatmap, transcript, ranking, download controls |
 | `app.py` | FastAPI server, saved jobs, uploads, playback, export jobs, local-origin checks |
+| `speakers.py` | Count-free local diarization, cross-chunk voice tracking, same-voice normalization |
+| `static/events.js` | Event boundaries and nearby peak retention |
 | `analysis.py` | Audio measurements, local transcription, speech detection, scoring inputs |
 | `source_media.py` | Source qualities, interval retrieval, validation, caching |
 | `dash_ranges.py` | Timestamp-aware retrieval and trimming of segmented YouTube streams |
@@ -55,5 +59,7 @@ The application interface and orchestration were developed for this project with
 Original application code is **source-available under [PolyForm Noncommercial 1.0.0](LICENSE)**. You may study, improve, and share it for permitted noncommercial purposes. Commercial use or selling the application or derivatives requires separate permission from the copyright holder. Keep `LICENSE` and the required notices when sharing changes. This is not an OSI-approved open-source license.
 
 Third-party libraries and models retain their own licenses; this application's noncommercial terms do not replace them. Your input media and exported clips remain subject to their original rights.
+
+Speaker detection can merge or split voices, especially with overlap, music, or short turns. Each voice needs eight seconds of clear reference; uncertain speech contributes no volume or pace evidence. The app does not guarantee perfect speaker counts or highlight recall. Older saved analyses show an **Update commentator scoring** button; this reuses retained media and transcript and preserves the previous result.
 
 Improvements and bug reports are welcome. By submitting an original contribution, you agree to license it under the same application license. Identify any third-party code and its license.

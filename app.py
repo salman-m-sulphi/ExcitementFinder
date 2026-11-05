@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from faster_whisper import WhisperModel
 from faster_whisper.vad import get_speech_timestamps, VadOptions
 from analysis import SR, extract_features, DEFAULT_WEIGHTS
+from speakers import detect_speakers, normalize_speaker_features
 from source_media import quality_options, remember_source, export_input, probe, atomic_json
 from source_media import source_details
 from dash_ranges import SourceRetrievalError
@@ -49,7 +50,7 @@ class ClipRange(BaseModel):
 
 class ClipRequest(BaseModel):
     format: Literal['clip', 'zip', 'combined']
-    segments: list[ClipRange] = Field(min_length=1, max_length=24)
+    segments: list[ClipRange] = Field(min_length=1, max_length=14400)
     quality: str | None = Field(default=None, max_length=64)
 
 
@@ -304,6 +305,26 @@ def retrieve_youtube(url, folder, job_id):
         raise ValueError('YouTube retrieval unavailable. Upload a local copy you are allowed to use. No sign-in or access restrictions are bypassed. Details: ' + str(exc)[-600:]) from exc
 
 
+SCORING_METHOD = ('Audio-based review heuristic, not a probability or visual-action detector. '
+    'Automatic local speaker clustering estimates the number of voices. Speech volume and pace are compared with each detected speaker\'s own median; gain differences between speakers do not directly increase these cues. '
+    'Eight seconds of unambiguous reference are required per voice. Mixed, overlapping, short-reference or unknown speech has no volume/pace evidence. '
+    'Same-speaker volume surge also compares with the preceding 30 seconds of that voice, with a 1 dB deadband. Non-speech sound cues remain recording-relative. '
+    'Speaker detection is imperfect, especially with overlap, music, short turns and very quiet speech. Event ranges retain nearby peaks separated by a score valley; continuous excitement stays in a longer event. Silence is forced to zero.')
+
+
+def speaker_scoring(audio, intervals, words, bins, warnings, job_id):
+    turns = []
+    if intervals:
+        try:
+            turns = detect_speakers(audio, MODELS, lambda fraction, message: update(job_id, 70 + 20 * fraction, message))
+        except Exception as exc:
+            warnings.append('Commentator detection unavailable: uncertain speech volume and pace cues were disabled, rather than using another commentator\'s baseline. ' + str(exc)[:200])
+    info = normalize_speaker_features(bins, turns, words, audio)
+    if intervals and info['calibrated_speakers'] < info['detected_speakers']:
+        warnings.append('Some detected voices have less than eight seconds of clear reference. Their speech volume and pace cues are disabled.')
+    return info
+
+
 def analyze(job_id, source, title, model_name, language, url=None):
     folder = DATA / job_id
     warnings = []
@@ -380,8 +401,9 @@ def analyze(job_id, source, title, model_name, language, url=None):
             warnings.append('Audio-only mode: transcription and word pace are disabled.')
         words.sort(key=lambda w: (w['start'] + w['end']) / 2)
         bins = extract_features(audio, intervals, words, lambda p, m: update(job_id, p, m))
+        speaker_info = speaker_scoring(audio, intervals, words, bins, warnings, job_id)
         del audio
-        update(job_id, 72, 'Preparing browser-compatible playback')
+        update(job_id, 92, 'Preparing browser-compatible playback')
         with av.open(str(source)) as container:
             videos = list(container.streams.video)
             audios = list(container.streams.audio)
@@ -399,8 +421,9 @@ def analyze(job_id, source, title, model_name, language, url=None):
                       language=detected_language, model=model_name, has_words=bool(words),
                       transcription_ok=transcription_ok, bins=bins, words=words,
                       transcript=transcript, speech_intervals=intervals, warnings=warnings,
+                      scoring_revision=2, speakers=speaker_info,
                       default_weights=DEFAULT_WEIGHTS, media_url=f'/api/jobs/{job_id}/media',
-                      methodology='Audio-based heuristic, not a probability or a visual-action detector. Pace uses model word-groups in centered 10-second windows. Volume surge compares each 2-second bin to the preceding 30 seconds, with a -55 dBFS baseline floor. Loudness and sound-change percentiles exclude near-silent bins. Spectral change measures positive normalized FFT changes. Silence: >=95% of frames below -55 dBFS.')
+                      methodology=SCORING_METHOD)
         (folder / 'result.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
         pcm.unlink(missing_ok=True)
         update(job_id, 100, 'Ready', status='done', title=title)
@@ -494,6 +517,52 @@ def result(job_id: str):
     if not p.exists():
         raise HTTPException(409, 'Analysis is not ready')
     return FileResponse(p, media_type='application/json')
+
+
+def refresh_scoring(job_id):
+    folder = DATA / job_id
+    pcm = folder / 'scoring-audio.f32'
+    audio = None
+    try:
+        update(job_id, 1, 'Updating commentator-aware scoring', status='running')
+        saved = json.loads((folder / 'result.json').read_text(encoding='utf-8'))
+        # Reuse local media and transcription; never retrieve the YouTube video.
+        source = folder / 'playback.mp4'
+        ffmpeg(['-i', str(source), '-vn', '-ac', '1', '-ar', str(SR), '-f', 'f32le', str(pcm)])
+        audio = np.memmap(pcm, dtype='float32', mode='r')
+        warnings = [w for w in saved.get('warnings', []) if not w.startswith(('Commentator detection', 'Some detected voices'))]
+        bins = extract_features(audio, saved.get('speech_intervals', []), saved.get('words', []), lambda p, m: update(job_id, p, m))
+        info = speaker_scoring(audio, saved.get('speech_intervals', []), saved.get('words', []), bins, warnings, job_id)
+        audio = None
+        backup = folder / 'result.before-speaker-scoring.json'
+        if not backup.exists():
+            shutil.copy2(folder / 'result.json', backup)
+        saved.update(bins=bins, speakers=info, scoring_revision=2, warnings=warnings, default_weights=DEFAULT_WEIGHTS, methodology=SCORING_METHOD)
+        atomic_json(folder / 'result.json', saved)
+        update(job_id, 100, 'Ready — commentator-aware scoring updated', status='done')
+    except Exception as exc:
+        update(job_id, 0, 'Scoring update failed; the previous analysis is preserved. ' + str(exc)[:250], status='error')
+    finally:
+        audio = None
+        pcm.unlink(missing_ok=True)
+        atomic_json(folder / 'status.json', jobs[job_id])
+
+
+@app.post('/api/jobs/{job_id}/refresh-scoring')
+def request_scoring_refresh(job_id: str):
+    folder = job_dir(job_id)
+    if not (folder / 'result.json').exists() or not (folder / 'playback.mp4').exists():
+        raise HTTPException(409, 'A completed analysis with retained playback is required')
+    saved = status(job_id)
+    with lock:
+        if jobs.get(job_id, saved).get('status') in ('queued', 'running', 'uploading'):
+            raise HTTPException(409, 'This analysis is already running')
+        if any(j.get('status') in ('queued', 'running', 'uploading') for j in jobs.values()):
+            raise HTTPException(409, 'Wait for the current analysis to finish')
+        jobs[job_id] = dict(saved, id=job_id, status='queued', progress=0, message='Queued commentator-aware scoring update')
+        atomic_json(folder / 'status.json', jobs[job_id])
+    executor.submit(refresh_scoring, job_id)
+    return dict(jobs[job_id])
 
 
 @app.post('/api/jobs/{job_id}/retry')

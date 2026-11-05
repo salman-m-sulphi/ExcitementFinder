@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict');
+const {selectEvents}=require('../static/events.js');
+const events=scores=>selectEvents(scores.map((_,i)=>({start:i*2,end:i*2+2,silence:false})),scores);
+let found=events([0,80,90,20,85,95,0]);
+assert.equal(found.length,2,'Both events less than 20 seconds apart must survive');
+assert.ok(found.some(e=>e.start===2&&e.end===6));
+assert.ok(found.some(e=>e.start===8&&e.end===12));
+found=events([0,65,85,80,90,75,70,0]);
+assert.equal(found.length,1,'Sustained excitement should stay one full event');
+assert.equal(found[0].start,2);assert.equal(found[0].end,14);
+assert.equal(events([0,90,90,90,0]).length,1,'A plateau must not become duplicate peaks');
+assert.equal(events([0,90,60,85,0]).length,2,'A clear valley within a sustained region must preserve two peaks');
+assert.equal(events(Array.from({length:80},(_,i)=>i%4===1?90:0)).length,20,'No top-twelve truncation');
+assert.deepEqual(events([0,0,0]),[]);
+assert.equal(events([0,59,0]).length,0);
+console.log('Event regression checks passed');

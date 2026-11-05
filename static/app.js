@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const labels = {pace:'Word pace',surge:'Volume surge',loudness:'Relative loudness',speech:'Speech activity',change:'Abrupt sound changes'};
-const hints = {pace:'10-second word density; language-dependent word groups',surge:'Rise above the preceding 30-second median',loudness:'Loudness relative to this recording',speech:'Silero speech detection; not an emotion classifier',change:'Spectral changes, including impacts, music, or crowd noise'};
+const hints = {pace:'Word pace above this commentator’s typical delivery',surge:'Rise above this commentator’s own level; uncertain speech is excluded',loudness:'Loudness above this commentator’s usual level',speech:'Silero speech detection; not an emotion classifier',change:'Spectral changes, including impacts, music, or crowd noise'};
 let data=null, scores=[], weights={}, currentJob=null, pollTimer=null, selected=0, transcriptRows=[];
 let exportBusy=false;
 let failedDownload=null;
@@ -22,7 +22,10 @@ async function openResult(id){
     data=await api(`/api/jobs/${id}/result`);currentJob=id;qualitiesReady=false;rangePreview=false;clearRecovery();
     $('#workspace').hidden=false;$('#title').textContent=data.title;$('#meta').textContent=`${time(data.duration)} · ${data.language} · ${data.model==='none'?'audio only':data.model+' model'}`;
     $('#video').src=data.media_url;$('#video').onerror=()=>error(Error('The browser could not play this media. Try another file or inspect the local server log.'));
-    $('#warnings').replaceChildren(...data.warnings.map(w=>element('p','',w)));$('#midTime').textContent=time(data.duration/2);$('#endTime').textContent=time(data.duration);
+    $('#warnings').replaceChildren(...data.warnings.map(w=>element('p','',w)));
+    if((data.scoring_revision||1)<2){const note=element('p','','This saved analysis uses older volume scoring. Update it to account for different commentator levels.');const button=element('button','clip-download','Update commentator scoring');button.onclick=async()=>{button.disabled=true;try{await api(`/api/jobs/${id}/refresh-scoring`,{method:'POST'});watch(id)}catch(e){error(e);button.disabled=false}};$('#warnings').append(note,button)}
+    else $('#warnings').append(element('p','',`${data.speakers?.detected_speakers||0} voices detected automatically · ${data.speakers?.calibrated_speakers||0} with enough reference speech. Voice detection can be imperfect.`));
+    $('#midTime').textContent=time(data.duration/2);$('#endTime').textContent=time(data.duration);
     $('#heatmap').setAttribute('aria-valuemax',data.duration);$('#methodText').textContent=data.methodology;
     weights={...data.default_weights};buildWeights();renderTranscript();selected=0;
     $('#rangeIn').value=preciseTime(0);$('#rangeOut').value=preciseTime(Math.min(12,Math.floor(data.duration*1000)/1000));$('#mapAction').value='seek';
@@ -60,19 +63,20 @@ $('#heatmap').onkeydown=e=>{if(!data)return;if(['ArrowRight','ArrowLeft','Home',
 function seek(seconds){rangePreview=false;const v=$('#video');v.currentTime=Math.max(0,Math.min(data.duration,seconds)-Number($('#lead').value));v.play().catch(()=>{});updatePlayhead()}
 function updatePlayhead(){if(!data)return;const t=$('#video').currentTime;if(rangePreview){const range=readRange();if(!range||t>=range.end){$('#video').pause();rangePreview=false}}$('#playhead').style.left=`${Math.min(100,t/data.duration*100)}%`;$('#playTime').textContent=`${time(t)} / ${time(data.duration)}`;$('#heatmap').setAttribute('aria-valuenow',t.toFixed(1));let current=data.transcript.find(s=>s.start<=t&&s.end>t);$('#currentText').textContent=current?.text||'No transcribed speech at this timestamp.';for(const [el,s]of transcriptRows)el.classList.toggle('active',s===current)}
 $('#video').ontimeupdate=updatePlayhead;
-function ranked(){if(!data||!Object.values(weights).some(v=>v>0))return [];const order=scores.map((score,i)=>({i,score})).filter(x=>!data.bins[x.i].silence&&x.score>0).sort((a,b)=>b.score-a.score);const picks=[];for(const p of order){if(picks.every(q=>Math.abs(data.bins[q.i].start-data.bins[p.i].start)>=20)){picks.push(p);if(picks.length===12)break}}return picks}
+function ranked(){if(!data||!Object.values(weights).some(v=>v>0))return [];return ExcitementEvents.selectEvents(data.bins,scores,Number($('#eventThreshold').value))}
 function reasons(i){const b=data.bins[i],total=Object.values(weights).reduce((a,b)=>a+b,0)||1;return Object.entries(b.signals).filter(([k,v])=>weights[k]>0&&v>0).sort((a,c)=>weights[c[0]]*c[1]-weights[a[0]]*a[1]).slice(0,3).map(([k,v])=>`${labels[k]} +${(100*weights[k]*v/total).toFixed(1)} pts`).join(' · ')}
 function renderRanked(){
   const container=$('#ranked');container.replaceChildren();const picks=ranked();
+  $('#eventCount').textContent=`${picks.length} events · all retained`;
   $('#downloadAll').disabled=exportBusy||!qualitiesReady||!picks.length;$('#downloadCombined').disabled=exportBusy||!qualitiesReady||!picks.length;
-  if(!picks.length){container.append(element('p','empty','No non-silent moments to rank with this mix.'));return}
+  if(!picks.length){container.append(element('p','empty','No events reach this threshold. Lower the threshold or adjust the signal mix to review weaker candidates.'));return}
   picks.forEach((p,j)=>{
     const b=data.bins[p.i],row=element('div','moment-row'),button=element('button','moment');button.type='button';
     const content=element('div');
-    content.append(element('strong','',`${time(b.start)}–${time(Math.min(data.duration,b.start+momentLength()))}`),element('small','',reasons(p.i)),element('small','',`${data.has_words?b.wpm+' word-groups/min · ':''}+${b.surge_db} dB rise · ${Math.round(b.speech_fraction*100)}% speech`));
+    content.append(element('strong','',`${time(p.start)}–${time(Math.min(data.duration,p.end+momentLength()))}`),element('small','',`Peak ${time(b.start)} · ${time(p.end-p.start)} event · ${reasons(p.i)}`),element('small','',`${data.has_words?b.wpm+' word-groups/min · ':''}+${b.surge_db} dB same-voice rise · ${Math.round(b.speech_fraction*100)}% speech`));
     const score=element('div','score',p.score.toFixed(0));score.append(element('small','','/ 100'));
     button.append(element('span','rank',String(j+1).padStart(2,'0')),content,score);
-    button.onclick=()=>{inspect(p.i);seek(b.start)};
+    button.onclick=()=>{inspect(p.i);seek(p.start)};
     const download=element('button','clip-download single-download','Download clip ↓');download.type='button';download.disabled=exportBusy||!qualitiesReady;
     download.setAttribute('aria-label',`Download moment ${j+1} at ${time(b.start)}`);
     download.onclick=()=>downloadMoments([p],'clip');row.append(button,download);container.append(row);
@@ -81,7 +85,7 @@ function renderRanked(){
 async function downloadMoments(picks,format){
   if(exportBusy||!data||!qualitiesReady||!picks.length)return;
   const snapshot=data,lead=Number($('#lead').value),length=momentLength();
-  const segments=picks.map(p=>({start:Math.max(0,snapshot.bins[p.i].start-lead),end:Math.min(snapshot.duration,snapshot.bins[p.i].start+length)}));
+  const segments=picks.map(p=>({start:Math.max(0,p.start-lead),end:Math.min(snapshot.duration,p.end+length)}));
   return downloadRanges(segments,format,snapshot.id);
 }
 async function downloadRanges(segments,format,jobId){
@@ -115,6 +119,7 @@ function clearRecovery(){failedDownload=null;for(const selector of ['#retryCache
 function retryCached(){const failed=failedDownload;if(!failed||exportBusy||data?.id!==failed.jobId)return;setQuality(failed.quality);downloadRanges(failed.segments,failed.format,failed.jobId)}
 $('#retryCachedRange').onclick=retryCached;$('#retryCachedMoments').onclick=retryCached;
 $('#clipLength').onchange=()=>{if(data)renderRanked()};
+$('#eventThreshold').oninput=()=>{if(data)renderRanked()};
 $('#downloadAll').onclick=()=>downloadMoments(ranked(),'zip');
 $('#downloadCombined').onclick=()=>downloadMoments(ranked(),'combined');
 let qualityCatalog=null;
@@ -182,7 +187,7 @@ $('#previewRange').onclick=()=>{const range=readRange();if(range){$('#video').cu
 $('#downloadRange').onclick=()=>{const range=readRange();if(range)downloadRanges([range],'clip',data.id)};
 function renderTranscript(){const q=$('#search').value.toLocaleLowerCase();const list=$('#transcript');list.replaceChildren();transcriptRows=[];$('#wordCount').textContent=`${data.words.length.toLocaleString()} word-groups`;const rows=data.transcript.filter(s=>s.text.toLocaleLowerCase().includes(q));if(!rows.length){list.append(element('p','empty',data.transcript.length?'No matching commentary.':'No transcript available. Use a transcription model to include spoken word pace.'));return}for(const s of rows){const button=element('button','transcript-row');button.append(element('time','',time(s.start)),element('span','',s.text));button.onclick=()=>seek(s.start);list.append(button);transcriptRows.push([button,s])}updatePlayhead()}
 $('#search').oninput=()=>{if(data)renderTranscript()};
-$('#export').onclick=()=>{const output={...data,weights,scores,selected_source_quality:$('#exportQuality').value,manual_selection:readRange(),ranked_segments:ranked().map(p=>({start:data.bins[p.i].start,end:Math.min(data.duration,data.bins[p.i].start+momentLength()),score:p.score,reasons:reasons(p.i)}))};const url=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)],{type:'application/json'}));const a=element('a');a.href=url;a.download='excitement-results.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+$('#export').onclick=()=>{const output={...data,weights,scores,event_threshold:Number($('#eventThreshold').value),selected_source_quality:$('#exportQuality').value,manual_selection:readRange(),ranked_segments:ranked().map(p=>({start:p.start,end:Math.min(data.duration,p.end+momentLength()),peak:data.bins[p.i].start,score:p.score,reasons:reasons(p.i)}))};const url=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)],{type:'application/json'}));const a=element('a');a.href=url;a.download='excitement-results.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 async function loadHistory(){
   try{
     const list=await api('/api/jobs');$('#history').replaceChildren();

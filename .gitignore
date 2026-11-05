@@ -13,3 +13,5 @@ storage-location.txt
 quality-preference.json
 .env
 .env.*
+work/
+release-artifacts/

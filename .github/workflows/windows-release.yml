@@ -1,0 +1,36 @@
+name: Build and release Windows
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements-lock.txt -r desktop-requirements.txt
+      - name: Run scoring, API and export tests
+        run: |
+          python -m unittest discover -s tests -v
+          node tests/test_events.js
+      - name: Cache bundled local models
+        run: |
+          python -c "from faster_whisper import WhisperModel; WhisperModel('tiny',device='cpu',compute_type='int8',download_root='models')"
+          python -c "from speakers import ensure_models; ensure_models('models')"
+      - name: Build Windows application
+        run: python build_desktop.py
+      - name: Test actual frozen engine and speaker models
+        run: python release/smoke.py
+      - name: Package clean archives and checksums
+        run: python release/prepare.py
+      - name: Publish tested release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python release/publish.py
