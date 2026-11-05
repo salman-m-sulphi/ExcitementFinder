@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict');
-const {momentAt}=require('../static/player.js');
+const {momentAt,displayAt}=require('../static/player.js');
 const events=[{key:'a',number:24,start:10,end:14},{key:'b',number:7,start:18,end:24}];
 assert.equal(momentAt(events,5,'a'),null,'Lead-in must not display the moment number');
 assert.equal(momentAt(events,10,'a').number,24,'Detected start is inclusive');
@@ -11,3 +11,14 @@ assert.equal(momentAt(events,11,'b').number,24,'Seeking back follows the playhea
 assert.equal(momentAt([],11,'a'),null,'Changing filters to remove an event clears its label');
 assert.equal(momentAt(events,NaN),null);
 console.log('Player moment-boundary checks passed');
+const adjacent=[{key:'old',number:19,start:2872,end:2878},{key:'chosen',number:25,start:2880,end:2890},{key:'next',number:7,start:2892,end:2898}];
+const selected={key:'chosen',leadStart:2875};
+assert.equal(momentAt(adjacent,2875,'chosen').number,19,'Reproduce the old misleading lead-in number');
+assert.deepEqual(displayAt(adjacent,2875,selected),{mode:'lead-in',moment:adjacent[1],remaining:5});
+assert.equal(displayAt(adjacent,2879,selected).moment.number,25,'Selection remains visible in the lead-in gap');
+assert.equal(displayAt(adjacent,2880,selected).mode,'event');
+assert.equal(displayAt(adjacent,2880,selected).moment.number,25);
+assert.equal(displayAt(adjacent,2890,selected).mode,'none','Detected out point still clears the event label');
+assert.equal(displayAt(adjacent,2892,selected).moment.number,7,'Next chronological event uses its own list number');
+assert.equal(displayAt(adjacent,2880,{key:'chosen',leadStart:null}).moment.number,25,'Zero lead-in displays the clicked number immediately');
+console.log('Selected-moment lead-in regression checks passed');

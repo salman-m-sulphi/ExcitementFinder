@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- Immediately identify the clicked moment during playback lead-in, with a countdown.
+- Prevent an earlier event crossed by the lead-in from looking like the selected moment.
+- Show the detected range consistently on cards and the playing badge.
+- Ignore stale floating-player updates after selecting another moment.
+- Verify the real #25/#19 lead-in collision and reselection through the native Windows player.
+
 ## 1.1.0 — 2026-11-06
 
 - Detected event numbers over the player, automatic next-event labels, and active-row highlighting.

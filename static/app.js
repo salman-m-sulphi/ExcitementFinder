@@ -76,7 +76,7 @@ function renderRanked(){
   picks.forEach((p,j)=>{
     const b=data.bins[p.i],row=element('div','moment-row'),button=element('button','moment');button.type='button';
     const content=element('div');
-    content.append(element('strong','',`${time(p.start)}–${time(Math.min(data.duration,p.end+momentLength()))}`),element('small','',`Peak ${time(b.start)} · ${time(p.end-p.start)} event · ${reasons(p.i)}`),element('small','',`${data.has_words?b.wpm+' word-groups/min · ':''}+${b.surge_db} dB same-voice rise · ${Math.round(b.speech_fraction*100)}% speech`));
+    content.append(element('strong','',`${time(p.start)}–${time(p.end)} · detected`),element('small','',`Peak ${time(b.start)} · ${time(p.end-p.start)} event · ${reasons(p.i)}`),element('small','',`${data.has_words?b.wpm+' word-groups/min · ':''}+${b.surge_db} dB same-voice rise · ${Math.round(b.speech_fraction*100)}% speech`));
     const score=element('div','score',p.score.toFixed(0));score.append(element('small','','/ 100'));
     button.append(element('span','rank',String(j+1).padStart(2,'0')),content,score);
     button.dataset.momentKey=`${p.start}:${p.end}`;

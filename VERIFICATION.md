@@ -17,3 +17,9 @@ Thirty Python regression tests passed, with the optional transcription test skip
 The actual Windows WebView was tested using an isolated library and retained local media. Clicking the 24th moment displayed Moment #24 only in its detected range, and playback continued beyond its out point. Scrolling produced the corner player. The separate native window stayed on top, retained the label, and kept the main player silent. Fullscreen filled a 1920×1080 monitor; Escape restored the window. Returning restored playback within a few milliseconds in the successful run. Immediate close/reopen and the native X-button path returned ownership safely. A close-handler deadlock found during development was resolved before packaging.
 
 No saved user analysis, transcript, media, or preference was changed by these player tests.
+
+## Moment-label correction 1.1.1
+
+Reproduced the misleading v1.1.0 behavior in the retained 73-event analysis: clicking #25 started its five-second lead-in inside event #19. Eight selections crossed a different event during lead-in, while 65 started in a gap. The clicked number was therefore initially different or absent despite matching correctly inside the detected area.
+
+Regression checks now distinguish selection during lead-in from the event being played, preserve exact detected boundaries, clear labels at the out point, and follow the next chronological event's list number. The actual Windows player displayed Selected moment #25 during lead-in and Moment #25 at 48:00–48:08; switching #25 → #28 → #25 while popped out retained the latest selection. Fullscreen, return, reopen and native close checks passed.

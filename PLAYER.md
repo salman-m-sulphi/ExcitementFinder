@@ -1,6 +1,10 @@
 # Reviewing moments with the player
 
-Click any numbered moment to start playback with your configured lead-in. The player shows **Moment #24**, for example, only while the playhead is inside that detected event. The number clears at its detected end, even when export tail is enabled. Playback continues normally. If playback reaches another detected event, its number appears automatically. The same moment is highlighted in the list. Changing the ranking or event threshold updates the displayed numbering to match the current list.
+Click any numbered moment to start playback with your configured lead-in. During that lead-in, the player immediately identifies your selection, for example **Selected moment #25 · starts in 5s (lead-in)**. It does not show a different event's number if the lead-in happens to cross an earlier detected event.
+
+When the selected detected area begins, the badge becomes **Moment #25** with its exact detected time range. The number clears at its detected end, independently of download tail. Playback continues, and the next detected event's own list number appears automatically. Moment numbers are the numbers in the score-ranked list; chronological playback may therefore encounter them out of numerical order.
+
+Cards show detected start/end bounds matching the playing badge. Download lead-in and tail are added separately. Changing the ranking or threshold updates numbers to match the current list.
 
 ## Bottom-right player
 
