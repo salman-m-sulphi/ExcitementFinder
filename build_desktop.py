@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import os
+import urllib.request
 
 root = Path(__file__).resolve().parent
 workspace = root
@@ -38,7 +39,11 @@ shutil.copy2(node, app / 'runtime' / 'node.exe')
 node_license = Path(node).with_name('LICENSE')
 if node_license.exists():
     shutil.copy2(node_license, app / 'runtime' / 'NODE-LICENSE.txt')
+else:
+    node_version = subprocess.check_output([node, '--version'], text=True).strip()
+    with urllib.request.urlopen('https://raw.githubusercontent.com/nodejs/node/' + node_version + '/LICENSE', timeout=30) as response:
+        (app / 'runtime' / 'NODE-LICENSE.txt').write_bytes(response.read())
 shutil.copytree(root / 'models', app / 'library' / 'models', dirs_exist_ok=True)
-for name in ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.txt','README.md','DOWNLOADS.md']:
+for name in ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.txt','README.md','DOWNLOADS.md','PLAYER.md','VERSION']:
     shutil.copy2(root/name,app/name)
 print('Built:', app / 'ExcitementFinder.exe')

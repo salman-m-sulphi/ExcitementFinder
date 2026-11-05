@@ -22,6 +22,7 @@ async function openResult(id){
   try{
     data=await api(`/api/jobs/${id}/result`);currentJob=id;qualitiesReady=false;rangePreview=false;clearRecovery();
     $('#workspace').hidden=false;$('#title').textContent=data.title;$('#meta').textContent=`${time(data.duration)} · ${data.language} · ${data.model==='none'?'audio only':data.model+' model'}`;
+    ExcitementPlayer.setContext(id,updatePlayhead);
     $('#video').src=data.media_url;$('#video').onerror=()=>error(Error('The browser could not play this media. Try another file or inspect the local server log.'));
     $('#warnings').replaceChildren(...data.warnings.map(w=>element('p','',w)));
     if((data.scoring_revision||1)<2){const note=element('p','','This saved analysis uses older volume scoring. Update it to account for different commentator levels.');const button=element('button','clip-download','Update commentator scoring');button.onclick=async()=>{button.disabled=true;try{await api(`/api/jobs/${id}/refresh-scoring`,{method:'POST'});watch(id)}catch(e){error(e);button.disabled=false}};$('#warnings').append(note,button)}
@@ -59,15 +60,16 @@ new ResizeObserver(()=>draw()).observe($('#heatmap'));
 function inspect(i){if(!data)return;selected=Math.max(0,Math.min(data.bins.length-1,i));const b=data.bins[selected];$('#hoverReadout').textContent=`${time(b.start)}–${time(b.end)} · ${scores[selected].toFixed(1)} / 100`;$('#binDetails').textContent=`${b.silence?'Silence · ':''}${data.has_words?b.wpm+' word-groups/min · ':''}${b.db} dBFS · +${b.surge_db} dB local rise · ${Math.round(b.speech_fraction*100)}% speech · sound change ${Math.round(b.signals.change*100)}/100`;$('#heatmap').setAttribute('aria-valuetext',`${time(b.start)}, score ${scores[selected]}, ${b.silence?'silence':Math.round(b.speech_fraction*100)+' percent speech'}`)}
 function eventIndex(e){const r=$('#heatmap').getBoundingClientRect();return Math.min(data.bins.length-1,Math.max(0,Math.floor((e.clientX-r.left)/r.width*data.duration/2)))}
 $('#heatmap').onpointermove=e=>{if(data)inspect(eventIndex(e))};
-$('#heatmap').onclick=e=>{if(data){inspect(eventIndex(e));const r=$('#heatmap').getBoundingClientRect();const t=Math.max(0,Math.min(data.duration,(e.clientX-r.left)/r.width*data.duration));const mode=$('#mapAction').value;if(mode==='seek')seek(t);else{setMark(mode,t);$('#video').currentTime=t;updatePlayhead()}}};
-$('#heatmap').onkeydown=e=>{if(!data)return;if(['ArrowRight','ArrowLeft','Home','End','Enter',' '].includes(e.key)){e.preventDefault();if(e.key==='ArrowRight')inspect(selected+1);if(e.key==='ArrowLeft')inspect(selected-1);if(e.key==='Home')inspect(0);if(e.key==='End')inspect(data.bins.length-1);const t=data.bins[selected].start,mode=$('#mapAction').value;if(mode==='seek')seek(t);else{setMark(mode,t);$('#video').currentTime=t}}};
-function seek(seconds){rangePreview=false;const v=$('#video');v.currentTime=Math.max(0,Math.min(data.duration,seconds)-Number($('#lead').value));v.play().catch(()=>{});updatePlayhead()}
-function updatePlayhead(){if(!data)return;const t=$('#video').currentTime;if(rangePreview){const range=readRange();if(!range||t>=range.end){$('#video').pause();rangePreview=false}}$('#playhead').style.left=`${Math.min(100,t/data.duration*100)}%`;$('#playTime').textContent=`${time(t)} / ${time(data.duration)}`;$('#heatmap').setAttribute('aria-valuenow',t.toFixed(1));let current=data.transcript.find(s=>s.start<=t&&s.end>t);$('#currentText').textContent=current?.text||'No transcribed speech at this timestamp.';for(const [el,s]of transcriptRows)el.classList.toggle('active',s===current)}
+$('#heatmap').onclick=e=>{if(data){inspect(eventIndex(e));const r=$('#heatmap').getBoundingClientRect();const t=Math.max(0,Math.min(data.duration,(e.clientX-r.left)/r.width*data.duration));const mode=$('#mapAction').value;if(mode==='seek')seek(t);else{setMark(mode,t);ExcitementPlayer.seekTo(t);updatePlayhead()}}};
+$('#heatmap').onkeydown=e=>{if(!data)return;if(['ArrowRight','ArrowLeft','Home','End','Enter',' '].includes(e.key)){e.preventDefault();if(e.key==='ArrowRight')inspect(selected+1);if(e.key==='ArrowLeft')inspect(selected-1);if(e.key==='Home')inspect(0);if(e.key==='End')inspect(data.bins.length-1);const t=data.bins[selected].start,mode=$('#mapAction').value;if(mode==='seek')seek(t);else{setMark(mode,t);ExcitementPlayer.seekTo(t)}}};
+function seek(seconds,key){rangePreview=false;ExcitementPlayer.playFrom(Math.max(0,Math.min(data.duration,seconds)-Number($('#lead').value)),key);updatePlayhead()}
+function updatePlayhead(){if(!data)return;const t=ExcitementPlayer.currentTime();if(rangePreview){const range=readRange();if(!range||t>=range.end){ExcitementPlayer.pause();rangePreview=false}}$('#playhead').style.left=`${Math.min(100,t/data.duration*100)}%`;$('#playTime').textContent=`${time(t)} / ${time(data.duration)}`;$('#heatmap').setAttribute('aria-valuenow',t.toFixed(1));let current=data.transcript.find(s=>s.start<=t&&s.end>t);$('#currentText').textContent=current?.text||'No transcribed speech at this timestamp.';for(const [el,s]of transcriptRows)el.classList.toggle('active',s===current)}
 $('#video').ontimeupdate=updatePlayhead;
 function ranked(){if(!data||!Object.values(weights).some(v=>v>0))return [];return ExcitementEvents.selectEvents(data.bins,scores,Math.max(1,Math.min(100,Number($('#eventThreshold').value)||20)))}
 function reasons(i){const b=data.bins[i],total=Object.values(weights).reduce((a,b)=>a+b,0)||1;return Object.entries(b.signals).filter(([k,v])=>weights[k]>0&&v>0).sort((a,c)=>weights[c[0]]*c[1]-weights[a[0]]*a[1]).slice(0,3).map(([k,v])=>`${labels[k]} +${(100*weights[k]*v/total).toFixed(1)} pts`).join(' · ')}
 function renderRanked(){
   const container=$('#ranked');container.replaceChildren();const picks=ranked();
+  ExcitementPlayer.setEvents(picks);
   $('#eventCount').textContent=`${picks.length} events · all retained`;
   $('#downloadAll').disabled=exportBusy||!qualitiesReady||!picks.length;$('#downloadCombined').disabled=exportBusy||!qualitiesReady||!picks.length;
   if(!picks.length){container.append(element('p','empty','No events reach this threshold. Lower the threshold or adjust the signal mix to review weaker candidates.'));return}
@@ -77,11 +79,13 @@ function renderRanked(){
     content.append(element('strong','',`${time(p.start)}–${time(Math.min(data.duration,p.end+momentLength()))}`),element('small','',`Peak ${time(b.start)} · ${time(p.end-p.start)} event · ${reasons(p.i)}`),element('small','',`${data.has_words?b.wpm+' word-groups/min · ':''}+${b.surge_db} dB same-voice rise · ${Math.round(b.speech_fraction*100)}% speech`));
     const score=element('div','score',p.score.toFixed(0));score.append(element('small','','/ 100'));
     button.append(element('span','rank',String(j+1).padStart(2,'0')),content,score);
-    button.onclick=()=>{inspect(p.i);seek(p.start)};
+    button.dataset.momentKey=`${p.start}:${p.end}`;
+    button.onclick=()=>{inspect(p.i);seek(p.start,button.dataset.momentKey)};
     const download=element('button','clip-download single-download','Download clip ↓');download.type='button';download.disabled=exportBusy||!qualitiesReady;
     download.setAttribute('aria-label',`Download moment ${j+1} at ${time(b.start)}`);
     download.onclick=()=>downloadMoments([p],'clip');row.append(button,download);container.append(row);
   });
+  ExcitementPlayer.update();
 }
 async function downloadMoments(picks,format){
   if(exportBusy||!data||!qualitiesReady||!picks.length)return;
@@ -182,10 +186,10 @@ function setMark(which,seconds){
   rangePreview=false;clearRecovery();const safe=Math.floor(Math.max(0,Math.min(data.duration,seconds))*1000)/1000;
   $(which==='in'?'#rangeIn':'#rangeOut').value=preciseTime(safe);updateRange();
 }
-$('#markIn').onclick=()=>{if(data)setMark('in',$('#video').currentTime)};
-$('#markOut').onclick=()=>{if(data)setMark('out',$('#video').currentTime)};
+$('#markIn').onclick=()=>{if(data)setMark('in',ExcitementPlayer.currentTime())};
+$('#markOut').onclick=()=>{if(data)setMark('out',ExcitementPlayer.currentTime())};
 for(const selector of ['#rangeIn','#rangeOut'])$(selector).oninput=()=>{rangePreview=false;clearRecovery();updateRange()};
-$('#previewRange').onclick=()=>{const range=readRange();if(range){$('#video').currentTime=range.start;rangePreview=true;$('#video').play().catch(()=>{});updatePlayhead()}};
+$('#previewRange').onclick=()=>{const range=readRange();if(range){rangePreview=true;ExcitementPlayer.playFrom(range.start);updatePlayhead()}};
 $('#downloadRange').onclick=()=>{const range=readRange();if(range)downloadRanges([range],'clip',data.id)};
 function renderTranscript(){const q=$('#search').value.toLocaleLowerCase();const list=$('#transcript');list.replaceChildren();transcriptRows=[];$('#wordCount').textContent=`${data.words.length.toLocaleString()} word-groups`;const rows=data.transcript.filter(s=>s.text.toLocaleLowerCase().includes(q));if(!rows.length){list.append(element('p','empty',data.transcript.length?'No matching commentary.':'No transcript available. Use a transcription model to include spoken word pace.'));return}for(const s of rows){const button=element('button','transcript-row');button.append(element('time','',time(s.start)),element('span','',s.text));button.onclick=()=>seek(s.start);list.append(button);transcriptRows.push([button,s])}updatePlayhead()}
 $('#search').oninput=()=>{if(data)renderTranscript()};
@@ -212,7 +216,7 @@ async function loadHistory(){
           if(!confirm('Delete this analysis and its stored media from this app?'))return;
           try{
             await api(`/api/jobs/${j.id}`,{method:'DELETE'});
-            if(data?.id===j.id){$('#video').pause();$('#video').removeAttribute('src');data=null;$('#workspace').hidden=true;history.replaceState(null,'',location.pathname)}
+            if(data?.id===j.id){ExcitementPlayer.clear();$('#video').removeAttribute('src');data=null;$('#workspace').hidden=true;history.replaceState(null,'',location.pathname)}
             loadHistory();
           }catch(e){error(e)}
         };

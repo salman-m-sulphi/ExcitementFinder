@@ -20,6 +20,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
           node tests/test_events.js
+          node tests/test_player.js
       - name: Cache bundled local models
         run: |
           python -c "from faster_whisper import WhisperModel; WhisperModel('tiny',device='cpu',compute_type='int8',download_root='models')"

@@ -79,8 +79,14 @@ def main():
             raise RuntimeError('The analysis engine took too long to start. See ' + str(logs / 'desktop.log'))
         webview.settings['ALLOW_DOWNLOADS'] = True
         webview.settings['ALLOW_FILE_URLS'] = False
-        window = webview.create_window('Excitement Finder', url, width=1320, height=900,
+        from player_window import PlayerAPI, PlayerWindows
+        players = PlayerWindows(url)
+        main_api = PlayerAPI(players)
+        window = webview.create_window('Excitement Finder v1.1.0', url, js_api=main_api, width=1320, height=900,
             min_size=(800, 650), background_color='#101413', text_select=True)
+        main_api._window = window
+        players.main = window
+        window.events.closed += players.close_all
 
         def closing():
             try:
@@ -92,6 +98,14 @@ def main():
                 pass
             return True
         window.events.closing += closing
+
+        if '--player-self-test' in sys.argv:
+            import faulthandler
+            (logs / 'player-test-pid.txt').write_text(str(os.getpid()))
+            trace_file = (logs / 'player-thread-dump.log').open('w', encoding='utf-8')
+            faulthandler.dump_traceback_later(25, repeat=True, file=trace_file)
+            from player_self_test import run as player_test
+            window.events.loaded += lambda: threading.Thread(target=player_test, args=(window,players,logs), daemon=True).start()
 
         # Opt-in end-to-end self-test of the built executable's actual WebView.
         if '--self-test' in sys.argv:

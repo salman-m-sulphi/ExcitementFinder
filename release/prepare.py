@@ -6,7 +6,7 @@ root = Path(__file__).resolve().parents[1]
 app = root / 'dist/ExcitementFinder'
 out = root / 'release-artifacts'
 out.mkdir(exist_ok=True)
-for name in ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.txt','README.md','DOWNLOADS.md','CHANGELOG.md','VERIFICATION.md']:
+for name in ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.txt','README.md','DOWNLOADS.md','CHANGELOG.md','VERIFICATION.md','PLAYER.md','VERSION']:
     shutil.copy2(root/name,app/name)
 archive = out/'ExcitementFinder-Windows.zip'
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED,compresslevel=5) as z:

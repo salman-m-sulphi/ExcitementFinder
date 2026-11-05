@@ -8,6 +8,10 @@ Get **ExcitementFinder-Windows.zip** from [Releases](https://github.com/salman-m
 
 Requires Windows 10/11 x64 and [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). Python, FFmpeg, Node.js, and the multilingual Tiny model are bundled. This portable build is unsigned.
 
+## Floating review player
+
+Moment numbers follow the detected area under the playhead, clear between events, and appear automatically for the next event. The player docks at the bottom-right while scrolling. **Floating window** opens a separate always-on-top player in the Windows app; **Fullscreen** expands it while keeping the moment number visible. [Player guide](PLAYER.md).
+
 ## Features
 
 - Local audio analysis and multilingual Whisper transcription; no paid API or API key.

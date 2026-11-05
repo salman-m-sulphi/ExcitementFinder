@@ -9,3 +9,11 @@ The packaged Windows engine was also exercised through its actual web interface.
 This is functional verification, not a human-labeled highlight-accuracy or multilingual transcription benchmark. YouTube retrieval depends on upstream availability.
 
 Speaker/event revision: gain-offset regression cases cover 1, 2, 5, and 9 voices, with up to 30 dB between their normal levels. A real within-voice rise remains detectable. Overlap, unknown voices and short references have no volume evidence. JavaScript event checks cover nearby separate events, clear valleys, sustained excitement, plateaus, no top-twelve cutoff, and threshold behavior. Full-precision local diarization detected four voices in the official four-speaker sample without specifying its count; only one voice had the eight seconds of reference required for calibration. This does not constitute a general diarization benchmark.
+
+## Player revision 1.1.0
+
+Thirty Python regression tests passed, with the optional transcription test skipped (31 total). Event-selection and player-boundary JavaScript checks passed. Player cases include detected-start inclusion, detected-end exclusion, no lead-in/tail label, automatic next-event numbering, reverse seeking, and filtering an event out.
+
+The actual Windows WebView was tested using an isolated library and retained local media. Clicking the 24th moment displayed Moment #24 only in its detected range, and playback continued beyond its out point. Scrolling produced the corner player. The separate native window stayed on top, retained the label, and kept the main player silent. Fullscreen filled a 1920×1080 monitor; Escape restored the window. Returning restored playback within a few milliseconds in the successful run. Immediate close/reopen and the native X-button path returned ownership safely. A close-handler deadlock found during development was resolved before packaging.
+
+No saved user analysis, transcript, media, or preference was changed by these player tests.

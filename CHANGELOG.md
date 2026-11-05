@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-11-06
+
+- Detected event numbers over the player, automatic next-event labels, and active-row highlighting.
+- Bottom-right docking while scrolling, with return and hide controls.
+- Separate resizable, always-on-top Windows player with synchronized playback and controls.
+- Fullscreen with moment labels, Escape to exit, and safe playback return on window close.
+- Browser pop-out fallback and playback-aware manual In/Out controls.
+- Include Node.js runtime notices when the installed runtime does not provide a local LICENSE file.
+
 ## 1.0.0
 
 - Automatic commentator-count estimation and same-voice level/pace normalization.

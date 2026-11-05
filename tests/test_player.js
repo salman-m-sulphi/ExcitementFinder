@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');
+const {momentAt}=require('../static/player.js');
+const events=[{key:'a',number:24,start:10,end:14},{key:'b',number:7,start:18,end:24}];
+assert.equal(momentAt(events,5,'a'),null,'Lead-in must not display the moment number');
+assert.equal(momentAt(events,10,'a').number,24,'Detected start is inclusive');
+assert.equal(momentAt(events,13.999,'a').number,24);
+assert.equal(momentAt(events,14,'a'),null,'Detected end is exclusive, independent of export tail');
+assert.equal(momentAt(events,16,'a'),null,'The number clears between detected events');
+assert.equal(momentAt(events,18,'a').number,7,'Continuous playback automatically labels the next event');
+assert.equal(momentAt(events,11,'b').number,24,'Seeking back follows the playhead');
+assert.equal(momentAt([],11,'a'),null,'Changing filters to remove an event clears its label');
+assert.equal(momentAt(events,NaN),null);
+console.log('Player moment-boundary checks passed');
