@@ -82,7 +82,7 @@ def main():
         from player_window import PlayerAPI, PlayerWindows
         players = PlayerWindows(url)
         main_api = PlayerAPI(players)
-        window = webview.create_window('Excitement Finder v1.1.1', url, js_api=main_api, width=1320, height=900,
+        window = webview.create_window('Excitement Finder v1.4.0', url, js_api=main_api, width=1320, height=900,
             min_size=(800, 650), background_color='#101413', text_select=True)
         main_api._window = window
         players.main = window

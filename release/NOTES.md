@@ -1,13 +1,11 @@
-Excitement Finder v1.1.1 fixes confusing or missing moment numbers when a selected moment has playback lead-in.
+Excitement Finder v1.4.0 adds selective bulk downloads and English subtitles.
 
-Download ExcitementFinder-Windows.zip, extract the entire ZIP and open ExcitementFinder.exe. Close the previous version before opening the update. Windows 10/11 x64 and WebView2 are required; runtimes and models are included.
+- All moments start checked. Use Check all, Uncheck all, or individual checkboxes to choose which moments go in ZIP and combined downloads.
+- Enable Include English subtitles (.srt) to use Whisper Medium on the finished clip. Save the separate matching SRT after a single, manual, or combined MP4 download. Bulk ZIPs contain a matching SRT per clip.
+- Subtitle times are relative to the downloaded video. Whisper can translate Malayalam and Hindi speech into English, with accuracy affected by noise and language switching. First use may download model weights.
+- Whisper tries NVIDIA CUDA, then compatible Vulkan GPUs, then CPU. A separate CUDA runtime may be needed for NVIDIA CUDA. The Vulkan backend is bundled.
+- Player labels match the moment list. Individual clips can include up to 30 seconds after the detected end.
 
-- The clicked number appears immediately as Selected moment #25 with a lead-in countdown.
-- Once its detected range begins, the badge shows Moment #25 and its exact detected bounds. It clears at the detected out point; playback continues and follows later detected events.
-- A previous event crossed during lead-in no longer looks like the selected moment. Cards display detected bounds consistently with the playing badge.
-- Floating-window reselection ignores stale playback updates from the previous selection.
-- Existing floating-window, fullscreen, scoring and download features are retained.
+Download **ExcitementFinder-Windows.zip**, extract the entire ZIP, and open **ExcitementFinder.exe**. Windows 10 or 11 x64 and WebView2 are required.
 
-Verified with the actual Windows player using the real #25/#19 collision, plus floating-window reselection, fullscreen, return and native close. Event/player JavaScript regressions and the Windows release checks must pass before publication.
-
-The PolyForm Noncommercial license for original application code is unchanged. Third-party components retain their own licenses. No recordings, analyses, browser profiles or local preferences are included. Checksums are in SHA256SUMS.txt.
+The original application code remains under PolyForm Noncommercial 1.0.0. Third-party components retain their licenses. Release files contain no local recordings, analyses, or preferences. Checksums are in SHA256SUMS.txt.

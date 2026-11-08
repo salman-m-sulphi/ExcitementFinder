@@ -23,3 +23,9 @@ No saved user analysis, transcript, media, or preference was changed by these pl
 Reproduced the misleading v1.1.0 behavior in the retained 73-event analysis: clicking #25 started its five-second lead-in inside event #19. Eight selections crossed a different event during lead-in, while 65 started in a gap. The clicked number was therefore initially different or absent despite matching correctly inside the detected area.
 
 Regression checks now distinguish selection during lead-in from the event being played, preserve exact detected boundaries, clear labels at the out point, and follow the next chronological event's list number. The actual Windows player displayed Selected moment #25 during lead-in and Moment #25 at 48:00–48:08; switching #25 → #28 → #25 while popped out retained the latest selection. Fullscreen, return, reopen and native close checks passed.
+
+## Version 1.4.0
+
+The GPU backend introduced in v1.3.0 passed frozen-build tests for NVIDIA CUDA, AMD Vulkan, and CPU fallback. Intel Vulkan hardware was unavailable for testing.
+
+The Windows build passed the browser checks for default bulk selection, selecting and clearing all moments, reranking, checked-only ZIP and combined exports, and individual exports. Medium produced time-bounded English SRT cues on English, Hindi, Malayalam, and mixed speech fixtures. ZIP pairing, the continuous combined timebase, fractional cuts, silent clips, and preservation of MP4 downloads after a subtitle failure were verified. Some translated wording was imperfect.

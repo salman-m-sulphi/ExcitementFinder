@@ -13,6 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 import imageio_ffmpeg
 import av
+import ctranslate2
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -25,6 +26,8 @@ from speakers import detect_speakers, normalize_speaker_features
 from source_media import quality_options, remember_source, export_input, probe, atomic_json
 from source_media import source_details
 from dash_ranges import SourceRetrievalError
+import vulkan_whisper
+from subtitles import write_srt
 
 ROOT = Path(__file__).resolve().parent
 HOME_ROOT = Path(os.environ.get('EXCITEMENT_HOME', ROOT))
@@ -39,8 +42,66 @@ executor = ThreadPoolExecutor(max_workers=1)
 jobs = {}
 lock = threading.Lock()
 models = {}
+whisper_lock = threading.Lock()
+cuda_dll_handles = []
 clip_executor = ThreadPoolExecutor(max_workers=1)
 clip_exports = {}
+
+
+def transcription_devices():
+    if os.environ.get('EXCITEMENT_FORCE_CPU') == '1':
+        yield 'cpu'
+        return
+    try:
+        with whisper_lock:
+            if os.name == 'nt' and not cuda_dll_handles:
+                runtime = HOME_ROOT / 'cuda'
+                directories = [runtime, *sorted((runtime / 'nvidia').glob('*/bin'))]
+                available = [str(path.resolve()) for path in directories if path.is_dir()]
+                for path in available:
+                    cuda_dll_handles.append(os.add_dll_directory(path))
+                if available:
+                    os.environ['PATH'] = os.pathsep.join([*available, os.environ.get('PATH', '')])
+            has_cuda = os.environ.get('EXCITEMENT_SKIP_CUDA') != '1' and ctranslate2.get_cuda_device_count()
+        if has_cuda:
+            yield 'cuda'
+    except (OSError, RuntimeError):
+        pass
+    for adapter in vulkan_whisper.adapters():
+        yield f'vulkan:{adapter}'
+    yield 'cpu'
+
+
+def device_label(device):
+    return {'cuda': 'NVIDIA GPU (CUDA)', 'vulkan': 'GPU (Vulkan)', 'cpu': 'CPU'}[device.partition(':')[0]]
+
+
+def whisper_model(name, device):
+    key = (name, device)
+    if key not in models:
+        models.clear()
+        models[key] = WhisperModel(name, device=device,
+                                   compute_type='int8_float16' if device == 'cuda' else 'int8',
+                                   download_root=str(MODELS), cpu_threads=max(1, min(8, os.cpu_count() or 4)))
+    return models[key]
+
+
+def transcribe_window(name, device, audio, language, translate=False):
+    with whisper_lock:
+        if device.startswith('vulkan:'):
+            return vulkan_whisper.transcribe(name, audio, SR, language, MODELS / 'vulkan',
+                                             device.split(':')[1], translate=translate)
+        try:
+            segments, info = whisper_model(name, device).transcribe(audio, language=language or None,
+                task='translate' if translate else 'transcribe', multilingual=translate,
+                word_timestamps=not translate, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500),
+                beam_size=3, condition_on_previous_text=False)
+            # Materialize the window before committing words, so a GPU retry
+            # cannot leave duplicate timestamps.
+            return list(segments), info
+        except (OSError, RuntimeError):
+            models.pop((name, device), None)
+            raise
 
 
 class ClipRange(BaseModel):
@@ -52,6 +113,7 @@ class ClipRequest(BaseModel):
     format: Literal['clip', 'zip', 'combined']
     segments: list[ClipRange] = Field(min_length=1, max_length=14400)
     quality: str | None = Field(default=None, max_length=64)
+    english_subtitles: bool = False
 
 
 class QualityChoice(BaseModel):
@@ -89,7 +151,7 @@ def export_folder(job_id, export_id):
     return folder
 
 
-def render_clips(job_id, export_id, segments, kind, quality):
+def render_clips(job_id, export_id, segments, kind, quality, english_subtitles=False):
     folder = DATA / job_id / 'exports' / export_id
     state = dict(status='running', progress=0, message='Preparing clips', quality=quality['id'], quality_label=quality['label'])
     def save(**changes):
@@ -128,24 +190,62 @@ def render_clips(job_id, export_id, segments, kind, quality):
                     '-c:a', 'aac', '-b:a', '160k', '-threads', '2', '-movflags', '+faststart', str(p)])
             files.append(p)
             measurements.append(dict(filename=name, origin=origin, notice=notice, source_start=s['start'], source_end=s['end'], **probe(p)))
-            save(progress=round(90 * (i + 1) / len(segments)), message=f'Extracted {i+1} of {len(segments)} moments')
+            save(progress=round((65 if english_subtitles else 90) * (i + 1) / len(segments)), message=f'Extracted {i+1} of {len(segments)} moments')
         manifest = dict(segments=segments, source_job=job_id, quality=quality, outputs=measurements,
                         timing='Exact requested bounds, quantized to source video frames; H.264/AAC re-encode')
-        atomic_json(folder / 'export.json', manifest)
-        if kind == 'zip':
-            output = folder / 'all-moments.zip'
-            with zipfile.ZipFile(output, 'w', zipfile.ZIP_STORED) as archive:
-                for p in files:
-                    archive.write(p, p.name)
-                archive.writestr('timestamps.json', json.dumps(manifest, indent=2))
-        elif kind == 'combined':
+        if kind == 'combined':
             listing = folder / 'concat.txt'
             listing.write_text(''.join(f"file '{p.name}'\n" for p in files), encoding='utf-8')
             output = folder / 'all-moments-combined.mp4'
             ffmpeg(['-f', 'concat', '-safe', '1', '-i', str(listing), '-c', 'copy', '-movflags', '+faststart', str(output)])
         else:
             output = files[0]
-        save(status='done', progress=100, message='Ready to download', filename=output.name, outputs=measurements, warnings=notices)
+        sidecars = []
+        if english_subtitles:
+            targets = files if kind == 'zip' else [output]
+            candidates, device, model_failure = transcription_devices(), None, None
+
+            def translate(audio):
+                nonlocal device, model_failure
+                if model_failure:
+                    raise RuntimeError(model_failure)
+                while True:
+                    if device is None:
+                        device = next(candidates)
+                    try:
+                        return transcribe_window('medium', device, audio, None, translate=True)[0]
+                    except Exception as exc:
+                        if device == 'cpu':
+                            model_failure = str(exc)[:250]
+                            raise
+                        device = None
+
+            for i, media in enumerate(targets):
+                save(progress=65 + round(30 * i / len(targets)),
+                     message=f'Generating English subtitles with Medium ({i+1}/{len(targets)})')
+                try:
+                    result = write_srt(media, probe(media)['duration'], ffmpeg, translate)
+                    sidecars.append(media.with_suffix('.srt'))
+                    if result['status'] == 'empty':
+                        notices.append(f'{media.name}: No speech detected. The SRT is empty.')
+                    if result['skipped']:
+                        notices.append(f'{media.name}: Some cues could not be translated into English.')
+                except Exception as exc:
+                    result = {'status': 'failed', 'message': str(exc)[:250]}
+                    notices.append(f'{media.name}: English subtitles could not be generated. {result["message"]}')
+                if kind == 'combined':
+                    manifest['subtitles'] = result
+                else:
+                    measurements[i]['subtitles'] = result
+        atomic_json(folder / 'export.json', manifest)
+        if kind == 'zip':
+            output = folder / 'all-moments.zip'
+            with zipfile.ZipFile(output, 'w', zipfile.ZIP_STORED) as archive:
+                for p in [*files, *sidecars]:
+                    archive.write(p, p.name)
+                archive.writestr('timestamps.json', json.dumps(manifest, indent=2))
+        download = {'subtitle_filename': sidecars[0].name} if sidecars and kind != 'zip' else {}
+        save(status='done', progress=100, message='Ready to download', filename=output.name, outputs=measurements, warnings=notices, **download)
     except Exception as exc:
         if isinstance(exc, SourceRetrievalError):
             atomic_json(folder / 'diagnostics.json', exc.details)
@@ -194,7 +294,7 @@ def create_clip_export(job_id: str, request: ClipRequest):
         target = folder / 'exports' / export_id
         target.mkdir(parents=True)
         (target / 'status.json').write_text(json.dumps(clip_exports[export_id]), encoding='utf-8')
-    clip_executor.submit(render_clips, job_id, export_id, segments, request.format, quality)
+    clip_executor.submit(render_clips, job_id, export_id, segments, request.format, quality, request.english_subtitles)
     return {'id': export_id}
 
 
@@ -218,6 +318,16 @@ def download_clips(job_id: str, export_id: str):
         raise HTTPException(409, 'The export is not ready yet')
     name = state['filename']
     return FileResponse(folder / name, filename=name, media_type='application/zip' if name.endswith('.zip') else 'video/mp4')
+
+
+@app.get('/api/jobs/{job_id}/exports/{export_id}/subtitles')
+def download_subtitles(job_id: str, export_id: str):
+    folder = export_folder(job_id, export_id)
+    state = clip_export_status(job_id, export_id)
+    name = state.get('subtitle_filename')
+    if state['status'] != 'done' or not name or not (folder / name).is_file():
+        raise HTTPException(404, 'No subtitle file is available for this export')
+    return FileResponse(folder / name, filename=name, media_type='application/x-subrip')
 
 
 @app.middleware('http')
@@ -329,6 +439,7 @@ def speaker_scoring(audio, intervals, words, bins, warnings, job_id, cached=None
 
 def analyze(job_id, source, title, model_name, language, url=None):
     folder = DATA / job_id
+    pcm = folder / 'audio.f32'
     warnings = []
     try:
         update(job_id, 1, 'Starting analysis', status='running')
@@ -336,7 +447,6 @@ def analyze(job_id, source, title, model_name, language, url=None):
             source, title = retrieve_youtube(url, folder, job_id)
             update(job_id, 5, 'Downloaded video', title=title)
         update(job_id, 8, 'Decoding audio (16 kHz mono)')
-        pcm = folder / 'audio.f32'
         ffmpeg(['-i', str(source), '-vn', '-ac', '1', '-ar', str(SR), '-f', 'f32le', str(pcm)])
         samples = pcm.stat().st_size // 4
         if not samples:
@@ -366,20 +476,33 @@ def analyze(job_id, source, title, model_name, language, url=None):
         words, transcript = [], []
         detected_language = language or 'undetermined'
         transcription_ok = model_name != 'none'
+        devices_used = []
         if transcription_ok and intervals:
             try:
-                update(job_id, 22, f'Loading {model_name} transcription model (first use downloads free model weights)')
-                if model_name not in models:
-                    models.clear()
-                    models[model_name] = WhisperModel(model_name, device='cpu', compute_type='int8', download_root=str(MODELS), cpu_threads=max(1, min(8, os.cpu_count() or 4)))
-                update(job_id, 25, 'Transcribing locally; long recordings can take a while')
+                candidates = transcription_devices()
+                device = next(candidates)
                 detected_languages = set()
                 for core_start in range(0, samples, 180 * SR):
                     core_end = min(samples, core_start + 180 * SR)
                     a, b = max(0, core_start - 2 * SR), min(samples, core_end + 2 * SR)
-                    segments, info = models[model_name].transcribe(audio[a:b], language=language or None,
-                        word_timestamps=True, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500),
-                        beam_size=3, condition_on_previous_text=False)
+                    progress = 25 + 28 * core_start / samples
+                    while True:
+                        backend = device.partition(':')[0]
+                        label = device_label(device)
+                        message = (f'Transcribing on {label}' if backend in devices_used or (model_name, device) in models
+                                   else f'Loading {model_name} on {label} (first use downloads model weights)')
+                        update(job_id, progress, message)
+                        try:
+                            segments, info = transcribe_window(model_name, device, audio[a:b], language)
+                            break
+                        except (OSError, RuntimeError) as exc:
+                            if device == 'cpu':
+                                raise
+                            previous = label
+                            device = next(candidates)
+                            warnings.append(f'{previous} transcription could not continue. Retried on {device_label(device)}. ' + str(exc)[:250])
+                    if backend not in devices_used:
+                        devices_used.append(backend)
                     detected_languages.add(info.language)
                     for s in segments:
                         kept = []
@@ -391,9 +514,7 @@ def analyze(job_id, source, title, model_name, language, url=None):
                                 kept.append(item)
                         if kept:
                             transcript.append(dict(start=kept[0]['start'], end=kept[-1]['end'], text=''.join(w['text'] for w in kept)))
-                        done = min(duration, s.end + a / SR)
-                        update(job_id, 25 + 28 * done / duration, f'Transcribing: {done / 60:.1f} / {duration / 60:.1f} minutes')
-                    update(job_id, 25 + 28 * core_end / samples, f'Transcribing: {core_end / SR / 60:.1f} / {duration / 60:.1f} minutes')
+                    update(job_id, 25 + 28 * core_end / samples, f'Transcribing on {label}: {core_end / SR / 60:.1f} / {duration / 60:.1f} minutes')
                 detected_language = ', '.join(sorted(detected_languages))
             except Exception as exc:
                 transcription_ok = False
@@ -404,6 +525,7 @@ def analyze(job_id, source, title, model_name, language, url=None):
         words.sort(key=lambda w: (w['start'] + w['end']) / 2)
         bins = extract_features(audio, intervals, words, lambda p, m: update(job_id, p, m))
         speaker_info = speaker_scoring(audio, intervals, words, bins, warnings, job_id)
+        audio._mmap.close()
         del audio
         update(job_id, 92, 'Preparing browser-compatible playback')
         with av.open(str(source)) as container:
@@ -421,17 +543,21 @@ def analyze(job_id, source, title, model_name, language, url=None):
                 '-movflags', '+faststart', '-threads', '4', str(folder / 'playback.mp4')])
         result = dict(id=job_id, title=title, duration=duration, bin_seconds=2,
                       language=detected_language, model=model_name, has_words=bool(words),
+                      transcription_devices=devices_used if transcription_ok else [],
                       transcription_ok=transcription_ok, bins=bins, words=words,
                       transcript=transcript, speech_intervals=intervals, warnings=warnings,
                       scoring_revision=2, speakers=speaker_info,
                       default_weights=DEFAULT_WEIGHTS, media_url=f'/api/jobs/{job_id}/media',
                       methodology=SCORING_METHOD)
         (folder / 'result.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
-        pcm.unlink(missing_ok=True)
         update(job_id, 100, 'Ready', status='done', title=title)
     except Exception as exc:
         update(job_id, 0, str(exc), status='error')
     finally:
+        try:
+            pcm.unlink(missing_ok=True)
+        except PermissionError:
+            pass
         (folder / 'status.json').write_text(json.dumps(jobs[job_id], ensure_ascii=False), encoding='utf-8')
 
 

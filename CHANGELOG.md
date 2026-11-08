@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.0
+
+- Select which moments to include in ZIP and combined downloads. All moments start checked.
+- Optionally export English SRT sidecars using Whisper Medium on the finished clip audio.
+
+## 1.3.0
+
+- Automatically use NVIDIA CUDA or a compatible Vulkan GPU for Whisper transcription.
+- Try the next compatible GPU backend and then CPU if inference fails.
+- Show the transcription device in progress and in completed analyses.
+
+## 1.2.0
+
+- Use the same moment numbers in the review list and all player modes.
+- Preserve selected-moment labels when handing off playback to the floating window.
+- Add an independent end extension and export range preview to each individual clip.
+
 ## 1.1.1
 
 - Immediately identify the clicked moment during playback lead-in, with a countdown.

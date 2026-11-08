@@ -4,9 +4,11 @@ const hints = {pace:'Word pace above this commentator’s typical delivery',surg
 let data=null, scores=[], weights={}, currentJob=null, pollTimer=null, selected=0, transcriptRows=[];
 let exportBusy=false;
 let failedDownload=null;
+let subtitleDownload=null;
 let qualitiesReady=false, rangePreview=false;
 let automaticEventThreshold=true;
-const momentLength=()=>Number($('#clipLength').value);
+const momentExtras=new Map();
+const excludedFromBulk=new Set();
 const time = s => {s=Math.max(0,Math.floor(s||0));return s>=3600?`${Math.floor(s/3600)}:${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`:`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`};
 function element(tag,cls,text){let e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 async function api(url,opts){const r=await fetch(url,opts);if(!r.ok){let e;try{e=await r.json()}catch{}throw Error(e?.detail||`Request failed (${r.status})`)}return r.json()}
@@ -20,8 +22,11 @@ $('#uploadForm').onsubmit=async e=>{e.preventDefault();$('#error').hidden=true;c
 function watch(id){currentJob=id;clearTimeout(pollTimer);async function tick(){try{const s=await api(`/api/jobs/${id}`);$('#status').hidden=false;$('#statusText').textContent=s.message;$('#percent').textContent=`${s.progress}%`;$('#progress').value=s.progress;if(s.status==='done'){await openResult(id);$('#analyze').disabled=false;loadHistory();return}if(s.status==='error'){error(Error(s.message));$('#analyze').disabled=false;loadHistory();return}pollTimer=setTimeout(tick,1400)}catch(e){error(e);$('#analyze').disabled=false}}tick()}
 async function openResult(id){
   try{
-    data=await api(`/api/jobs/${id}/result`);currentJob=id;qualitiesReady=false;rangePreview=false;clearRecovery();
-    $('#workspace').hidden=false;$('#title').textContent=data.title;$('#meta').textContent=`${time(data.duration)} · ${data.language} · ${data.model==='none'?'audio only':data.model+' model'}`;
+    const result=await api(`/api/jobs/${id}/result`);
+    if(data?.id!==id){momentExtras.clear();excludedFromBulk.clear();showSubtitleLink(id)}
+    data=result;currentJob=id;qualitiesReady=false;rangePreview=false;clearRecovery();
+    const devices=(data.transcription_devices||[]).map(device=>({cuda:'NVIDIA GPU',vulkan:'GPU (Vulkan)',cpu:'CPU'})[device]).filter(Boolean).join(' + ');
+    $('#workspace').hidden=false;$('#title').textContent=data.title;$('#meta').textContent=`${time(data.duration)} · ${data.language} · ${data.model==='none'?'audio only':data.model+' model'}${devices?' · '+devices:''}`;
     ExcitementPlayer.setContext(id,updatePlayhead);
     $('#video').src=data.media_url;$('#video').onerror=()=>error(Error('The browser could not play this media. Try another file or inspect the local server log.'));
     $('#warnings').replaceChildren(...data.warnings.map(w=>element('p','',w)));
@@ -66,68 +71,121 @@ function seek(seconds,key){rangePreview=false;ExcitementPlayer.playFrom(Math.max
 function updatePlayhead(){if(!data)return;const t=ExcitementPlayer.currentTime();if(rangePreview){const range=readRange();if(!range||t>=range.end){ExcitementPlayer.pause();rangePreview=false}}$('#playhead').style.left=`${Math.min(100,t/data.duration*100)}%`;$('#playTime').textContent=`${time(t)} / ${time(data.duration)}`;$('#heatmap').setAttribute('aria-valuenow',t.toFixed(1));let current=data.transcript.find(s=>s.start<=t&&s.end>t);$('#currentText').textContent=current?.text||'No transcribed speech at this timestamp.';for(const [el,s]of transcriptRows)el.classList.toggle('active',s===current)}
 $('#video').ontimeupdate=updatePlayhead;
 function ranked(){if(!data||!Object.values(weights).some(v=>v>0))return [];return ExcitementEvents.selectEvents(data.bins,scores,Math.max(1,Math.min(100,Number($('#eventThreshold').value)||20)))}
+const momentKey=p=>`${p.start}:${p.end}`;
+const selectedMoments=()=>ranked().filter(p=>!excludedFromBulk.has(momentKey(p)));
+function updateBulkControls(){
+  const inputs=[...document.querySelectorAll('.bulk-moment')];
+  const count=inputs.filter(input=>input.checked).length;
+  $('#bulkCount').textContent=`${count} of ${inputs.length} selected`;
+  $('#checkAll').disabled=count===inputs.length;
+  $('#uncheckAll').disabled=!count;
+  for(const id of ['#downloadAll','#downloadCombined'])$(id).disabled=exportBusy||!qualitiesReady||!count;
+}
+function selectBulkMoments(checked){
+  for(const input of document.querySelectorAll('.bulk-moment')){
+    input.checked=checked;
+    if(checked)excludedFromBulk.delete(input.dataset.key);else excludedFromBulk.add(input.dataset.key);
+  }
+  updateBulkControls();
+}
 function reasons(i){const b=data.bins[i],total=Object.values(weights).reduce((a,b)=>a+b,0)||1;return Object.entries(b.signals).filter(([k,v])=>weights[k]>0&&v>0).sort((a,c)=>weights[c[0]]*c[1]-weights[a[0]]*a[1]).slice(0,3).map(([k,v])=>`${labels[k]} +${(100*weights[k]*v/total).toFixed(1)} pts`).join(' · ')}
 function renderRanked(){
-  const container=$('#ranked');container.replaceChildren();const picks=ranked();
-  ExcitementPlayer.setEvents(picks);
+  const container=$('#ranked'),scrollTop=container.scrollTop;
+  container.replaceChildren();
+  const picks=ranked().map((p,index)=>({...p,number:index+1,key:momentKey(p)}));
   $('#eventCount').textContent=`${picks.length} events · all retained`;
-  $('#downloadAll').disabled=exportBusy||!qualitiesReady||!picks.length;$('#downloadCombined').disabled=exportBusy||!qualitiesReady||!picks.length;
-  if(!picks.length){container.append(element('p','empty','No events reach this threshold. Lower the threshold or adjust the signal mix to review weaker candidates.'));return}
-  picks.forEach((p,j)=>{
+  if(!picks.length)container.append(element('p','empty','No events reach this threshold. Lower the threshold or adjust the signal mix to review weaker candidates.'));
+  picks.forEach(p=>{
     const b=data.bins[p.i],row=element('div','moment-row'),button=element('button','moment');button.type='button';
     const content=element('div');
     content.append(element('strong','',`${time(p.start)}–${time(p.end)} · detected`),element('small','',`Peak ${time(b.start)} · ${time(p.end-p.start)} event · ${reasons(p.i)}`),element('small','',`${data.has_words?b.wpm+' word-groups/min · ':''}+${b.surge_db} dB same-voice rise · ${Math.round(b.speech_fraction*100)}% speech`));
     const score=element('div','score',p.score.toFixed(0));score.append(element('small','','/ 100'));
-    button.append(element('span','rank',String(j+1).padStart(2,'0')),content,score);
-    button.dataset.momentKey=`${p.start}:${p.end}`;
-    button.onclick=()=>{inspect(p.i);seek(p.start,button.dataset.momentKey)};
+    button.append(element('span','rank',ExcitementPlayer.rankLabel(p.number)),content,score);
+    button.dataset.momentKey=p.key;
+    button.onclick=()=>{inspect(p.i);seek(p.start,p.key)};
     const download=element('button','clip-download single-download','Download clip ↓');download.type='button';download.disabled=exportBusy||!qualitiesReady;
-    download.setAttribute('aria-label',`Download moment ${j+1} at ${time(b.start)}`);
-    download.onclick=()=>downloadMoments([p],'clip');row.append(button,download);container.append(row);
+    download.setAttribute('aria-label',`Download moment ${p.number} at ${time(p.start)}`);
+    const controls=element('div','moment-download-controls'),label=element('label','','Add after end '),extra=element('select','moment-extra'),preview=element('small','moment-export-range');
+    const bulkLabel=element('label','bulk-label'),bulk=element('input','bulk-moment');
+    bulk.type='checkbox';bulk.dataset.key=p.key;bulk.checked=!excludedFromBulk.has(p.key);
+    bulk.setAttribute('aria-label',`Include moment ${p.number} in bulk downloads`);
+    bulk.onchange=()=>{
+      if(bulk.checked)excludedFromBulk.delete(p.key);else excludedFromBulk.add(p.key);
+      updateBulkControls();
+    };
+    bulkLabel.append(bulk,' Include in bulk');
+    extra.setAttribute('aria-label',`Add after end for moment ${p.number}`);
+    for(const seconds of [0,5,10,15,20,25,30]){
+      const option=element('option','',`${seconds?'+':''}${seconds} seconds`);option.value=seconds;extra.append(option);
+    }
+    extra.value=momentExtras.get(p.key)??0;
+    const showRange=()=>{const {start,end}=momentExportRange(p,Number(extra.value));preview.textContent=`Export ${preciseTime(start)}–${preciseTime(end)}`};
+    extra.onchange=()=>{momentExtras.set(p.key,Number(extra.value));showRange()};
+    showRange();
+    download.onclick=()=>downloadMoments([p],'clip',Number(extra.value));
+    label.append(extra);controls.append(bulkLabel,download,label,preview);row.append(button,controls);container.append(row);
   });
-  ExcitementPlayer.update();
+  container.scrollTop=scrollTop;
+  ExcitementPlayer.setEvents(picks);
+  updateBulkControls();
 }
-async function downloadMoments(picks,format){
+function momentExportRange(p,extra=0){
+  return {start:Math.max(0,p.start-Number($('#lead').value)),end:Math.min(data.duration,p.end+extra)};
+}
+async function downloadMoments(picks,format,extra=0){
   if(exportBusy||!data||!qualitiesReady||!picks.length)return;
-  const snapshot=data,lead=Number($('#lead').value),length=momentLength();
-  const segments=picks.map(p=>({start:Math.max(0,p.start-lead),end:Math.min(snapshot.duration,p.end+length)}));
-  return downloadRanges(segments,format,snapshot.id);
+  return downloadRanges(picks.map(p=>momentExportRange(p,extra)),format,data.id);
 }
-async function downloadRanges(segments,format,jobId){
+function showSubtitleLink(jobId=data?.id){
+  const {href,filename}=subtitleDownload&&subtitleDownload.jobId===jobId?subtitleDownload:{};
+  for(const selector of ['#clipSubtitleLink','#rangeSubtitleLink']){
+    const link=$(selector);link.hidden=!href;
+    if(href){link.href=href;link.download=filename}else{link.removeAttribute('href');link.removeAttribute('download')}
+  }
+}
+async function downloadRanges(segments,format,jobId,englishSubtitles=$('#clipSubtitles').checked){
   if(exportBusy||!qualitiesReady)return;
   $('#error').hidden=true;
   const quality=$('#exportQuality').value;
   const status=$('#clipStatus'),manualStatus=$('#rangeStatus');status.hidden=false;
   const report=text=>{status.textContent=text;manualStatus.textContent=text};
-  clearRecovery();report('Preparing download at the selected source quality…');exportBusy=true;renderRanked();updateRange();
+  clearRecovery();subtitleDownload=null;showSubtitleLink();report('Preparing download at the selected source quality…');exportBusy=true;renderRanked();updateRange();
   try{
-    const job=await api(`/api/jobs/${jobId}/exports`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({format,segments,quality})});
+    const job=await api(`/api/jobs/${jobId}/exports`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({format,segments,quality,english_subtitles:englishSubtitles})});
     const base=`/api/jobs/${jobId}/exports/${job.id}`;
     for(;;){
       const result=await api(base);report(`${result.message} · ${result.progress}%`);
       if(result.status==='error'){
         if(result.recovery_quality&&data?.id===jobId){
-          failedDownload={segments,format,jobId,quality:result.recovery_quality};
+          failedDownload={segments,format,jobId,englishSubtitles,quality:result.recovery_quality};
           for(const selector of ['#retryCachedRange','#retryCachedMoments']){const button=$(selector);button.textContent=result.recovery_label;button.hidden=false}
         }
         throw Error(result.message);
       }
       if(result.status==='done'){
         const a=element('a');a.href=base+'/download';a.download=result.filename;document.body.append(a);a.click();a.remove();
-        report(`Ready — ${result.quality_label||quality}. Your download has started.${result.warnings?.length?' '+result.warnings.join(' '):''}`);break;
+        if(result.subtitle_filename){
+          subtitleDownload={jobId,href:base+'/subtitles',filename:result.subtitle_filename};
+          showSubtitleLink();
+        }
+        report(`Ready — ${result.quality_label||quality}. Your download has started.${result.subtitle_filename?' Save the English SRT separately below.':''}${result.warnings?.length?' '+result.warnings.join(' '):''}`);break;
       }
       await new Promise(resolve=>setTimeout(resolve,700));
     }
   }catch(e){report(e.message);error(e)}finally{exportBusy=false;if(data){renderRanked();updateRange()}}
 }
 function clearRecovery(){failedDownload=null;for(const selector of ['#retryCachedRange','#retryCachedMoments']){const button=$(selector);if(button)button.hidden=true}}
-function retryCached(){const failed=failedDownload;if(!failed||exportBusy||data?.id!==failed.jobId)return;setQuality(failed.quality);downloadRanges(failed.segments,failed.format,failed.jobId)}
+function retryCached(){const failed=failedDownload;if(!failed||exportBusy||data?.id!==failed.jobId)return;setQuality(failed.quality);downloadRanges(failed.segments,failed.format,failed.jobId,failed.englishSubtitles)}
 $('#retryCachedRange').onclick=retryCached;$('#retryCachedMoments').onclick=retryCached;
-$('#clipLength').onchange=()=>{if(data)renderRanked()};
+$('#lead').onchange=()=>{if(data)renderRanked()};
 $('#eventThreshold').oninput=()=>{automaticEventThreshold=false;if(data)renderRanked()};
 $('#autoThreshold').onclick=()=>{automaticEventThreshold=true;if(data)rescore()};
-$('#downloadAll').onclick=()=>downloadMoments(ranked(),'zip');
-$('#downloadCombined').onclick=()=>downloadMoments(ranked(),'combined');
+$('#checkAll').onclick=()=>selectBulkMoments(true);
+$('#uncheckAll').onclick=()=>selectBulkMoments(false);
+$('#downloadAll').onclick=()=>downloadMoments(selectedMoments(),'zip');
+$('#downloadCombined').onclick=()=>downloadMoments(selectedMoments(),'combined');
+$('#clipSubtitles').onchange=e=>{$('#rangeSubtitles').checked=e.target.checked};
+$('#rangeSubtitles').onchange=e=>{$('#clipSubtitles').checked=e.target.checked};
 let qualityCatalog=null;
 async function loadQualities(id,refresh=false){
   qualitiesReady=false;qualityCatalog=null;
@@ -193,7 +251,7 @@ $('#previewRange').onclick=()=>{const range=readRange();if(range){rangePreview=t
 $('#downloadRange').onclick=()=>{const range=readRange();if(range)downloadRanges([range],'clip',data.id)};
 function renderTranscript(){const q=$('#search').value.toLocaleLowerCase();const list=$('#transcript');list.replaceChildren();transcriptRows=[];$('#wordCount').textContent=`${data.words.length.toLocaleString()} word-groups`;const rows=data.transcript.filter(s=>s.text.toLocaleLowerCase().includes(q));if(!rows.length){list.append(element('p','empty',data.transcript.length?'No matching commentary.':'No transcript available. Use a transcription model to include spoken word pace.'));return}for(const s of rows){const button=element('button','transcript-row');button.append(element('time','',time(s.start)),element('span','',s.text));button.onclick=()=>seek(s.start);list.append(button);transcriptRows.push([button,s])}updatePlayhead()}
 $('#search').oninput=()=>{if(data)renderTranscript()};
-$('#export').onclick=()=>{const output={...data,weights,scores,event_threshold:Number($('#eventThreshold').value),selected_source_quality:$('#exportQuality').value,manual_selection:readRange(),ranked_segments:ranked().map(p=>({start:p.start,end:Math.min(data.duration,p.end+momentLength()),peak:data.bins[p.i].start,score:p.score,reasons:reasons(p.i)}))};const url=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)],{type:'application/json'}));const a=element('a');a.href=url;a.download='excitement-results.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+$('#export').onclick=()=>{const output={...data,weights,scores,event_threshold:Number($('#eventThreshold').value),selected_source_quality:$('#exportQuality').value,manual_selection:readRange(),ranked_segments:ranked().map(p=>({start:p.start,end:p.end,peak:data.bins[p.i].start,score:p.score,reasons:reasons(p.i)}))};const url=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)],{type:'application/json'}));const a=element('a');a.href=url;a.download='excitement-results.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 async function loadHistory(){
   try{
     const list=await api('/api/jobs');$('#history').replaceChildren();

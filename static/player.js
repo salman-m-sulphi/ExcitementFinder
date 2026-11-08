@@ -13,6 +13,7 @@
     const active=momentAt(events,seconds,selection?.key);
     return {mode:active?'event':'none',moment:active};
   }
+  const rankLabel=number=>String(number).padStart(2,'0');
   if(typeof module!=='undefined'&&module.exports){module.exports={momentAt,displayAt};return}
   const video=document.querySelector('#video'),dock=document.querySelector('#playerDock'),anchor=document.querySelector('#playerAnchor');
   const badge=document.querySelector('#currentMoment'),status=document.querySelector('#playerStatus');
@@ -32,7 +33,7 @@
     const active=display.mode==='event'?display.moment:null;
     const chosen=events.find(e=>e.key===preferred);
     if(!chosen||t>=chosen.start)selectionLeadStart=null;
-    const text=display.mode==='lead-in'?`Selected moment #${display.moment.number} · starts in ${display.remaining}s (lead-in)`:active?`Moment #${active.number} · ${format(active.start)}–${format(active.end)}`:'';
+    const text=display.mode==='lead-in'?`Selected moment #${rankLabel(display.moment.number)} · starts in ${display.remaining}s (lead-in)`:active?`Moment #${rankLabel(active.number)} · ${format(active.start)}–${format(active.end)}`:'';
     if(badge.textContent!==text)badge.textContent=text;
     badge.hidden=display.mode==='none';badge.classList.toggle('lead-in',display.mode==='lead-in');
     for(const row of document.querySelectorAll('.moment')){
@@ -41,16 +42,15 @@
       row.classList.toggle('pending-moment',display.mode==='lead-in'&&row.dataset.momentKey===display.moment.key);
       if(playing)row.setAttribute('aria-current','true');else row.removeAttribute('aria-current');
     }
-    if(popout&&active)document.title=`Moment #${active.number} — Excitement Finder`;
+    if(popout&&active)document.title=`Moment #${rankLabel(active.number)} — Excitement Finder`;
     else if(popout)document.title='Floating player — Excitement Finder';
   }
   function format(s){const total=Math.floor(s);return total>=3600?`${Math.floor(total/3600)}:${String(Math.floor(total/60)%60).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`:`${Math.floor(total/60)}:${String(total%60).padStart(2,'0')}`}
-  function setEvents(picks,fromOwner=false){
-    if(popout&&ownerEvents&&!fromOwner)return;
-    if(fromOwner)ownerEvents=true;
-    events=picks.map((p,i)=>({start:p.start,end:p.end,number:p.number||i+1,key:`${p.start}:${p.end}`}));
+  function setEvents(picks){
+    if(popout)return;
+    events=picks;
     update();
-    if(!popout&&(external||pending))send({type:'events',events,preferred,leadStart:selectionLeadStart});
+    if(external)send({type:'events',events});
   }
   function setContext(id,onClock){
     if(id===job){clock=onClock;return}
@@ -85,14 +85,14 @@
     if(!message||message.job!==job)return;
     if(popout){
       if(message.type==='state'){
-        preferred=message.preferred;selectionLeadStart=message.leadStart??null;seekRevision=message.revision;setEvents(message.events,true);
+        preferred=message.preferred;selectionLeadStart=message.leadStart??null;seekRevision=message.revision;events=message.events;ownerEvents=true;
         video.currentTime=Math.max(0,Math.min(video.duration||Infinity,message.time));
         video.volume=message.volume;video.muted=message.muted;video.playbackRate=message.rate;
         if(message.paused)video.pause();else video.play().catch(()=>report('Press Play to continue in this window.'));
         update();
-      }else if(message.type==='events'){preferred=message.preferred;selectionLeadStart=message.leadStart??null;setEvents(message.events,true)}
-      else if(message.type==='command'){
-        if(message.command==='seek'){preferred=message.preferred;selectionLeadStart=message.leadStart??null;seekRevision=message.revision;video.currentTime=message.time;if(message.play)video.play().catch(()=>{})}
+      }else if(message.type==='events'&&ownerEvents){events=message.events;update()}
+      else if(message.type==='command'&&ownerEvents){
+        if(message.command==='seek'){preferred=message.preferred;selectionLeadStart=message.leadStart??null;seekRevision=message.revision;video.currentTime=message.time;if(message.play)video.play().catch(()=>{});update()}
         if(message.command==='return')closeWindow();
         if(message.command==='pause')video.pause();
         if(message.command==='fullscreen')fullscreen();
@@ -164,7 +164,7 @@
   document.querySelector('#externalReturn').onclick=()=>send({type:'command',command:'return'});
   if(popout){document.querySelector('#playerPopout').textContent='Return to app';document.querySelector('#playerPopout').title='Continue in the main app'}
   video.addEventListener('loadedmetadata',()=>{if(popout)send({type:'ready'});position()});
-  for(const event of ['timeupdate','seeked','play','pause','ended','volumechange','ratechange'])video.addEventListener(event,()=>{
+  for(const event of ['timeupdate','seeking','seeked','play','pause','ended','volumechange','ratechange'])video.addEventListener(event,()=>{
     update();
     if(popout&&(event!=='timeupdate'||performance.now()-lastState>150)){lastState=performance.now();send({type:'tick',time:video.currentTime,paused:video.paused,volume:video.volume,muted:video.muted,rate:video.playbackRate,revision:seekRevision})}
   });
@@ -175,5 +175,5 @@
   root.addEventListener('resize',position);
   root.addEventListener('beforeunload',()=>{if(popout)returnToApp();else send({type:'shutdown'})});
   setInterval(()=>{if(!popout&&external&&popup?.closed)windowClosed(job,token)},1000);
-  root.ExcitementPlayer={momentAt,setContext,setEvents,playFrom,seekTo,pause,clear,currentTime,update,returnToApp,windowClosed,fullscreen,openWindow};
+  root.ExcitementPlayer={momentAt,rankLabel,setContext,setEvents,playFrom,seekTo,pause,clear,currentTime,update,returnToApp,windowClosed,fullscreen,openWindow};
 })(globalThis);

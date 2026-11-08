@@ -15,3 +15,6 @@ quality-preference.json
 .env.*
 work/
 release-artifacts/
+
+/whisper_vulkan/
+/cuda/

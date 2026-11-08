@@ -26,6 +26,11 @@ args = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--onedir', '--windo
         '--collect-submodules', 'uvicorn', '--copy-metadata', 'tqdm',
         '--exclude-module', 'matplotlib', '--exclude-module', 'tkinter', '--exclude-module', 'PyQt5',
         '--exclude-module', 'PyQt6', '--exclude-module', 'PySide6', str(root / 'desktop.py')]
+vulkan = root / 'whisper_vulkan'
+if os.environ.get('GITHUB_ACTIONS') == 'true' and not vulkan.is_dir():
+    subprocess.run([sys.executable, str(root / 'release' / 'fetch_vulkan.py')], check=True)
+if vulkan.is_dir():
+    args[-1:-1] = ['--add-data', str(vulkan) + ';whisper_vulkan']
 subprocess.run(args, cwd=root, check=True)
 app = dist / 'ExcitementFinder'
 # Copy the staged program over the existing installation without deleting its
@@ -43,7 +48,13 @@ else:
     node_version = subprocess.check_output([node, '--version'], text=True).strip()
     with urllib.request.urlopen('https://raw.githubusercontent.com/nodejs/node/' + node_version + '/LICENSE', timeout=30) as response:
         (app / 'runtime' / 'NODE-LICENSE.txt').write_bytes(response.read())
-shutil.copytree(root / 'models', app / 'library' / 'models', dirs_exist_ok=True)
-for name in ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.txt','README.md','DOWNLOADS.md','PLAYER.md','VERSION']:
+def skip_optional_models(directory, names):
+    if Path(directory) == root / 'models':
+        return [name for name in names if name in ('.locks', 'vulkan') or
+                (name.startswith('models--') and name != 'models--Systran--faster-whisper-tiny')]
+    return []
+
+shutil.copytree(root / 'models', app / 'library' / 'models', dirs_exist_ok=True, ignore=skip_optional_models)
+for name in ['LICENSE','NOTICE','THIRD_PARTY_NOTICES.txt','README.md','DOWNLOADS.md','PLAYER.md','GPU.md','VERSION']:
     shutil.copy2(root/name,app/name)
 print('Built:', app / 'ExcitementFinder.exe')

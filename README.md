@@ -17,9 +17,11 @@ Moment numbers follow the detected area under the playhead, clear between events
 - Local audio analysis and multilingual Whisper transcription; no paid API or API key.
 - Automatic local speaker clustering without entering a commentator count. Speech volume and pace are compared with each voice’s own baseline.
 - Adjustable scoring from word pace, volume surge, loudness, speech activity, and sound changes.
-- Event ranges preserve nearby peaks, extend through sustained excitement, and have no top-twelve cutoff. Event threshold, lead-in, and tail are adjustable.
+- Event ranges preserve nearby peaks, extend through sustained excitement, and have no top-twelve cutoff. Event threshold and lead-in are adjustable. Individual clips can include extra time after a moment.
 - Timestamped transcript, heatmap seeking, playback lead-in, and saved analyses.
-- Individual moment MP4s, all moments in a ZIP, or a combined chronological video.
+- Individual moment MP4s, a ZIP of checked moments, or a combined chronological video. All moments start checked.
+- Optional English SRT sidecars generated from the exported audio with Whisper Medium.
+- Automatic NVIDIA CUDA or compatible Vulkan GPU acceleration for Whisper, with CPU fallback. [GPU guide](GPU.md).
 - Exact manual In/Out selection and available original/source download qualities.
 
 Scores are audio-based review suggestions, not a visual-action detector or a calibrated probability of excitement. YouTube availability and transcription accuracy vary. Use recordings you have permission to obtain and process. [Download guide](DOWNLOADS.md).
@@ -36,10 +38,11 @@ To build the desktop folder:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r desktop-requirements.txt
+.\.venv\Scripts\python.exe release/fetch_vulkan.py
 .\.venv\Scripts\python.exe build_desktop.py
 ```
 
-The result is under `dist/ExcitementFinder`. Analyze a short recording with Tiny before building to cache its weights in `models/`. The build copies cached models into the portable library. Local libraries, videos, logs, browser profiles, and settings are excluded from this repository and release.
+The result is under `dist/ExcitementFinder`. Analyze a short recording with Tiny before building to cache its weights in `models/`. The build copies Tiny and the speaker models into the portable library. Local libraries, videos, logs, browser profiles, and settings are excluded from this repository and release.
 
 ## Modules
 
@@ -50,6 +53,8 @@ The result is under `dist/ExcitementFinder`. Analyze a short recording with Tiny
 | `speakers.py` | Count-free local diarization, cross-chunk voice tracking, same-voice normalization |
 | `static/events.js` | Event boundaries and nearby peak retention |
 | `analysis.py` | Audio measurements, local transcription, speech detection, scoring inputs |
+| `subtitles.py` | Clip-relative English SRT generation from finished audio |
+| `vulkan_whisper.py` | Cross-vendor Vulkan Whisper execution |
 | `source_media.py` | Source qualities, interval retrieval, validation, caching |
 | `dash_ranges.py` | Timestamp-aware retrieval and trimming of segmented YouTube streams |
 | `desktop.py` | Windows window through pywebview/WebView2, local server lifecycle |

@@ -15,11 +15,19 @@ The choice applies to individual recommended clips, **Download all · ZIP**, **C
 
 ## Download recommended moments
 
-Each card is a complete detected event, with its strongest timestamp shown as the peak. Choose **Tail after event**, then use **Download clip**. The range includes the whole event plus your selected playback lead-in and tail, clipped to the recording. **No tail** adds nothing after the detected event end. Nearby peaks separated by a score valley stay separate, with no twenty-second exclusion or top-twelve cap. The adjustable **Event threshold** can expose weaker candidates. **Download all** includes every retained event.
+Use a card's **Add after end** selector to extend its individual **Download clip** by up to 30 seconds, in five-second steps. The export starts at the detected start minus the playback lead-in and ends at the detected end plus the selected extension. The range shown beside the button accounts for the recording's start and end. ZIP and combined downloads use the detected bounds plus the playback lead-in.
 
-**Download all · ZIP** saves each listed moment as a separate MP4 plus `timestamps.json` documenting requested ranges, chosen source quality, measured output dimensions, and source origin.
+**Download selected · ZIP** saves each checked moment as a separate MP4 plus `timestamps.json` documenting requested ranges, chosen source quality, measured output dimensions, and source origin.
 
-**Combined video** sorts the listed ranges chronologically and merges overlapping ranges so footage is not repeated at an overlap.
+**Combined video** sorts the checked ranges chronologically and merges overlapping ranges so footage is not repeated at an overlap.
+
+All moments start checked. Use **Check all**, **Uncheck all**, or each moment’s **Include in bulk** checkbox. Individual clip downloads are available for every moment.
+
+## English subtitle sidecars
+
+Turn on **Include English subtitles (.srt)** in either export section. Whisper Medium transcribes English and translates other speech into English locally from the final exported audio. It can use the GPU and may download model weights on first use. Fast language switching, overlapping speech, names, and race noise can affect accuracy.
+
+For an individual clip, a manual section, or a combined video, the MP4 downloads first and **Save English SRT** downloads a separate file with the matching basename. ZIP exports include a sidecar per clip. Timestamps start at the exported video’s zero and include any lead-in and extra time in the video. A silent clip receives an empty SRT. If generation fails, the video remains downloadable and the app reports the failure.
 
 ## Download any manually selected section
 
