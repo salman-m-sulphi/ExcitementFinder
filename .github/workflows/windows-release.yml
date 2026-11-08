@@ -1,6 +1,9 @@
 name: Build and release Windows
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [VERSION]
 permissions:
   contents: write
 jobs:
